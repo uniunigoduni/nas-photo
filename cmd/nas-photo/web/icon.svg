@@ -1,6 +1,26 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#111827"/>
-  <path d="M92 142c0-28 22-50 50-50h228c28 0 50 22 50 50v228c0 28-22 50-50 50H142c-28 0-50-22-50-50V142Z" fill="#72a7ff"/>
-  <circle cx="336" cy="177" r="39" fill="#f8fafc"/>
-  <path d="m124 357 88-101 61 67 40-42 75 76H124Z" fill="#111827"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="NAS-PHOTO">
+  <defs>
+    <linearGradient id="sky" x1="72" y1="48" x2="444" y2="464" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#20b8e8"/>
+      <stop offset=".52" stop-color="#43a4e4"/>
+      <stop offset="1" stop-color="#8c79e2"/>
+    </linearGradient>
+    <linearGradient id="near-mountain" x1="110" y1="210" x2="344" y2="474" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#14549a"/>
+      <stop offset="1" stop-color="#173a70"/>
+    </linearGradient>
+    <clipPath id="frame">
+      <rect x="32" y="32" width="448" height="448" rx="70"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#frame)">
+    <rect x="32" y="32" width="448" height="448" fill="url(#sky)"/>
+    <circle cx="345" cy="148" r="45" fill="#f8f8f5"/>
+
+    <path d="M244 344 324 263c17-17 44-17 61 0l95 96v121H190Z" fill="#4d70cf"/>
+    <path d="M32 321 164 190c22-22 57-22 79 0l237 237v53H32Z" fill="url(#near-mountain)"/>
+  </g>
+
+  <rect x="33" y="33" width="446" height="446" rx="69" fill="none" stroke="#0b355f" stroke-opacity=".18" stroke-width="2"/>
 </svg>

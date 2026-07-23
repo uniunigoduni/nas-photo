@@ -111,6 +111,25 @@ func TestDefaultSplitToggleShortcut(t *testing.T) {
 	}
 }
 
+func TestWebShellDeclaresSVGIcon(t *testing.T) {
+	index, err := assets.ReadFile("web/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(index), `rel="icon" href="/icon.svg" type="image/svg+xml"`) {
+		t.Fatal("web shell does not declare the SVG favicon")
+	}
+	icon, err := assets.ReadFile("web/icon.svg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, feature := range []string{`linearGradient id="sky"`, `circle cx="345"`, `clipPath id="frame"`} {
+		if !strings.Contains(string(icon), feature) {
+			t.Fatalf("SVG icon is missing %q", feature)
+		}
+	}
+}
+
 func TestDefaultMuteShortcut(t *testing.T) {
 	if got := defaults()["mute"]; got != "KeyM" {
 		t.Fatalf("unexpected mute shortcut: %q", got)
