@@ -102,9 +102,21 @@ label { display: grid; gap: .4rem; color: #dbe5f6; }
 }
 .gallery.size-small { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
 .gallery.size-large { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
-.gallery.river { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
-.gallery.river.size-small { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
-.gallery.river.size-large { grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); }
+.gallery.river {
+  --river-target-height: 180px;
+  --river-gap: 8px;
+  display: block;
+}
+.gallery.river.size-small { --river-target-height: 125px; }
+.gallery.river.size-large { --river-target-height: 270px; }
+.river-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--river-gap);
+  width: 100%;
+  margin-bottom: var(--river-gap);
+}
+.river-row:last-child { margin-bottom: 0; }
 .tile {
   position: relative;
   width: 100%;
@@ -117,7 +129,12 @@ label { display: grid; gap: .4rem; color: #dbe5f6; }
   background: #182238;
   color: white;
 }
-.river .tile { aspect-ratio: 16 / 10; }
+.river .tile {
+  flex: 0 0 auto;
+  width: auto;
+  aspect-ratio: auto;
+}
+.river .tile img { object-fit: contain; }
 .tile img {
   position: absolute;
   inset: 0;
@@ -148,7 +165,6 @@ label { display: grid; gap: .4rem; color: #dbe5f6; }
   font-size: .82rem;
   padding-left: 2px;
 }
-.load-area { display: flex; justify-content: center; padding: 1rem 1rem 3rem; }
 .dialog {
   position: fixed;
   inset: 0;
@@ -343,9 +359,9 @@ kbd { padding: .25rem .5rem; border: 1px solid #5b6b88; border-radius: 6px; back
   .gallery, .gallery.size-small, .gallery.size-large {
     grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
   }
-  .gallery.river, .gallery.river.size-small, .gallery.river.size-large {
-    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  }
+  .gallery.river { --river-target-height: 145px; }
+  .gallery.river.size-small { --river-target-height: 100px; }
+  .gallery.river.size-large { --river-target-height: 210px; }
   .add-pane, .previous, .next, .split-divider, .split-window { display: none; }
   .pane { touch-action: none; }
   .controls { opacity: 1; }

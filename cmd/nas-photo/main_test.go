@@ -77,6 +77,39 @@ func TestWebDefaultsToEnglishWithoutSetupStepCounters(t *testing.T) {
 	}
 }
 
+func TestEmptyGalleryDoesNotRestartScanMonitor(t *testing.T) {
+	content, err := assets.ReadFile("web/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(content)
+	if strings.Contains(source, "else if (state.total === 0)") {
+		t.Fatal("an empty gallery still restarts itself from the scan monitor")
+	}
+	if !strings.Contains(source, "else if (observedRunning)") ||
+		!strings.Contains(source, "await showGallery()") {
+		t.Fatal("gallery is not refreshed once after an observed scan finishes")
+	}
+}
+
+func TestGalleryAutomaticallyLoadsEveryMediaPage(t *testing.T) {
+	content, err := assets.ReadFile("web/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(content)
+	if strings.Contains(source, `id="load-more"`) {
+		t.Fatal("manual load-more control is still rendered")
+	}
+	if !strings.Contains(source, "void loadRemainingPages(token)") ||
+		!strings.Contains(source, "while (token === state.galleryToken && state.nextOffset >= 0)") {
+		t.Fatal("gallery does not automatically continue through media pages")
+	}
+	if !strings.Contains(source, "while (!next && delta > 0 && state.nextOffset >= 0)") {
+		t.Fatal("viewer navigation does not continue across an unloaded page boundary")
+	}
+}
+
 func TestMakeImageThumbnail(t *testing.T) {
 	dir := t.TempDir()
 	source := filepath.Join(dir, "source.jpg")
@@ -96,6 +129,10 @@ func TestMakeImageThumbnail(t *testing.T) {
 	}
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
+	}
+	width, height := mediaDimensions(source, "image")
+	if width != 1200 || height != 600 {
+		t.Fatalf("unexpected source dimensions: %dx%d", width, height)
 	}
 	if err := makeImageThumbnail(source, target); err != nil {
 		t.Fatal(err)

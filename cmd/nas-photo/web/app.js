@@ -26,7 +26,7 @@ const messages = {
     sort:'Sort', view:'View', filter:'Filter', rescan:'Rescan', settings:'Settings',
     sortTip:'Change the sort order', viewTip:'Change gallery layout and size', filterTip:'Filter media types',
     rescanTip:'Rescan the media library', settingsTip:'Open settings', loading:'Loading…',
-    loadMore:'Load more', loadMoreTip:'Load more gallery items', noMedia:'No media matches these conditions.',
+    noMedia:'No media matches these conditions.',
     captured:'Date captured', created:'Date created', modified:'Date modified', name:'Name',
     all:'All', images:'Images & GIFs', videos:'Videos', ascending:'Ascending', descending:'Descending',
     river:'River', square:'Square', small:'Small', medium:'Medium', large:'Large',
@@ -73,7 +73,7 @@ const messages = {
     sort:'ソート', view:'種類とサイズ', filter:'フィルター', rescan:'再スキャン', settings:'設定',
     sortTip:'並び順を変更', viewTip:'一覧の表示方法とサイズを変更', filterTip:'表示するメディアの種類を絞り込み',
     rescanTip:'メディア一覧を再スキャン', settingsTip:'設定を開く', loading:'読み込んでいます…',
-    loadMore:'さらに読み込む', loadMoreTip:'一覧の続きを読み込む', noMedia:'条件に一致するメディアはありません。',
+    noMedia:'条件に一致するメディアはありません。',
     captured:'撮影日', created:'作成日', modified:'変更日', name:'名前',
     all:'すべて', images:'画像・GIF', videos:'動画', ascending:'昇順', descending:'降順',
     river:'リバー', square:'正方形', small:'小', medium:'中', large:'大',
@@ -129,6 +129,11 @@ const state = {
   activePane: 0,
   shortcuts: {...DEFAULT_SHORTCUTS},
   galleryToken: 0,
+  galleryLayoutFrame: 0,
+  galleryObserver: null,
+  galleryWidth: 0,
+  aspectRatios: new Map(),
+  pageLoadRequest: null,
   pollTimer: null,
   controlsTimer: null,
   controlsHideAt: 0,
@@ -195,7 +200,7 @@ async function boot() {
 
 async function openInitialMedia() {
   while (!findItem(initialMediaId) && state.nextOffset >= 0) {
-    await loadPage(state.nextOffset);
+    await loadNextPage();
   }
   if (findItem(initialMediaId)) openViewer(initialMediaId, 0);
 }
@@ -356,6 +361,7 @@ async function showGallery() {
   clearTimeout(state.pollTimer);
   state.items = [];
   state.nextOffset = 0;
+  state.pageLoadRequest = null;
   app.innerHTML = `<div class="progress" hidden><i></i></div>
     <header class="top">
       <strong>NAS-PHOTO</strong>
@@ -366,11 +372,11 @@ async function showGallery() {
       <span class="spacer"></span><button class="secondary icon-button" id="settings" aria-label="${t('settings')}" data-tooltip="${t('settingsTip')}">⚙</button>
     </header>
     <div class="selection-summary" id="selection-summary"></div>
-    <main class="gallery ${state.layout} size-${state.size}" id="gallery"><p class="empty">${t('loading')}</p></main>
-    <div class="load-area"><button class="secondary" id="load-more" data-tooltip="${t('loadMoreTip')}" hidden>${t('loadMore')}</button></div>`;
+    <main class="gallery ${state.layout} size-${state.size}" id="gallery"><p class="empty">${t('loading')}</p></main>`;
   bindGalleryControls();
   try {
     await loadPage(0, token);
+    void loadRemainingPages(token);
     monitorScan(token);
   } catch (reason) {
     if (token === state.galleryToken) $('#gallery').innerHTML = `<p class="error">${escapeHTML(reason.message)}</p>`;
@@ -386,21 +392,61 @@ async function loadPage(offset, token = state.galleryToken) {
   renderTiles();
 }
 
+async function loadNextPage(token = state.galleryToken) {
+  if (token !== state.galleryToken || state.nextOffset < 0) return false;
+  if (state.pageLoadRequest?.token === token) {
+    await state.pageLoadRequest.promise;
+    return token === state.galleryToken;
+  }
+
+  const offset = state.nextOffset;
+  const request = {token, promise: loadPage(offset, token)};
+  state.pageLoadRequest = request;
+  try {
+    await request.promise;
+    return token === state.galleryToken;
+  } finally {
+    if (state.pageLoadRequest === request) state.pageLoadRequest = null;
+  }
+}
+
+async function loadRemainingPages(token = state.galleryToken) {
+  try {
+    while (token === state.galleryToken && state.nextOffset >= 0) {
+      if (!await loadNextPage(token)) return;
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+  } catch (reason) {
+    const gallery = $('#gallery');
+    if (token === state.galleryToken && gallery) {
+      gallery.insertAdjacentHTML('beforeend', `<p class="error">${escapeHTML(reason.message)}</p>`);
+    }
+  }
+}
+
 function renderTiles() {
   const gallery = $('#gallery');
   if (!gallery) return;
+  state.galleryObserver?.disconnect();
+  state.galleryObserver = null;
+  state.galleryWidth = 0;
   gallery.className = `gallery ${state.layout} size-${state.size}`;
   gallery.innerHTML = state.items.length ? state.items.map(tileHTML).join('') :
     `<p class="empty">${t('noMedia')}</p>`;
   $$('.tile', gallery).forEach(tile => tile.onclick = () => openViewer(tile.dataset.id, 0));
-  const more = $('#load-more');
-  more.hidden = state.nextOffset < 0;
-  more.textContent = `${t('loadMore')} (${state.items.length} / ${state.total})`;
-  more.onclick = async () => {
-    more.disabled = true;
-    await loadPage(state.nextOffset);
-    more.disabled = false;
-  };
+  bindGalleryThumbnails(gallery);
+  if (state.layout === 'river') {
+    scheduleRiverLayout();
+    if ('ResizeObserver' in window) {
+      state.galleryObserver = new ResizeObserver(entries => {
+        const width = entries[0]?.contentRect.width || 0;
+        if (Math.abs(width - state.galleryWidth) < 0.5) return;
+        state.galleryWidth = width;
+        scheduleRiverLayout();
+      });
+      state.galleryObserver.observe(gallery);
+    }
+  }
   const sortLabels = {captured: t('captured'), created: t('created'), modified: t('modified'), name: t('name')};
   const filterLabels = {'': t('all'), image: t('images'), video: t('videos')};
   $('#selection-summary').textContent =
@@ -411,11 +457,72 @@ function renderTiles() {
 
 function tileHTML(item) {
   const thumb = `/api/media/${item.id}/thumbnail`;
-  return `<button class="tile" data-id="${item.id}" aria-label="${escapeHTML(item.name)}" data-tooltip="${t('mediaTip')}">
+  const knownRatio = Number(item.width) > 0 && Number(item.height) > 0
+    ? Number(item.width) / Number(item.height)
+    : state.aspectRatios.get(item.id) || 4 / 3;
+  return `<button class="tile" data-id="${item.id}" data-aspect-ratio="${knownRatio}" aria-label="${escapeHTML(item.name)}" data-tooltip="${t('mediaTip')}">
     <span class="thumb-fallback"></span>
-    <img src="${thumb}" loading="lazy" decoding="async" alt="" onerror="this.remove()">
+    <img src="${thumb}" loading="lazy" decoding="async" alt="">
     ${item.kind === 'video' ? '<span class="play-mark" aria-hidden="true">▶</span>' : ''}
   </button>`;
+}
+
+function bindGalleryThumbnails(gallery) {
+  $$('img', gallery).forEach(image => {
+    const tile = image.closest('.tile');
+    const updateRatio = () => {
+      if (!image.naturalWidth || !image.naturalHeight) return;
+      const ratio = image.naturalWidth / image.naturalHeight;
+      state.aspectRatios.set(tile.dataset.id, ratio);
+      if (Math.abs(Number(tile.dataset.aspectRatio) - ratio) < 0.001) return;
+      tile.dataset.aspectRatio = String(ratio);
+      scheduleRiverLayout();
+    };
+    image.addEventListener('load', updateRatio, {once: true});
+    image.addEventListener('error', () => {
+      image.remove();
+      scheduleRiverLayout();
+    }, {once: true});
+    if (image.complete) updateRatio();
+  });
+}
+
+function scheduleRiverLayout() {
+  if (state.layout !== 'river') return;
+  cancelAnimationFrame(state.galleryLayoutFrame);
+  state.galleryLayoutFrame = requestAnimationFrame(layoutRiverGallery);
+}
+
+function layoutRiverGallery() {
+  state.galleryLayoutFrame = 0;
+  const gallery = $('#gallery');
+  if (!gallery || state.layout !== 'river' || !window.NasPhotoLayout) return;
+  const tiles = [...gallery.querySelectorAll('.tile')];
+  if (!tiles.length) return;
+
+  const style = getComputedStyle(gallery);
+  const width = gallery.clientWidth -
+    (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0);
+  if (width <= 0) return;
+  const targetHeight = parseFloat(style.getPropertyValue('--river-target-height')) || 180;
+  const gap = parseFloat(style.getPropertyValue('--river-gap')) || 0;
+  const ratios = tiles.map(tile => Number(tile.dataset.aspectRatio) || 4 / 3);
+  const rows = window.NasPhotoLayout.computeJustifiedRows(ratios, width, targetHeight, gap);
+  const content = document.createDocumentFragment();
+
+  rows.forEach(row => {
+    const rowElement = document.createElement('div');
+    rowElement.className = `river-row${row.justified ? ' justified' : ''}`;
+    rowElement.style.gap = `${row.gap}px`;
+    for (let index = row.start; index < row.end; index += 1) {
+      const tile = tiles[index];
+      tile.style.width = `${Math.max(1, row.widths[index - row.start])}px`;
+      tile.style.height = `${Math.max(1, row.height)}px`;
+      rowElement.append(tile);
+    }
+    content.append(rowElement);
+  });
+  gallery.replaceChildren(content);
 }
 
 function bindGalleryControls() {
@@ -461,7 +568,7 @@ function optionDialog(title, sections, onSelect) {
   overlay.onclick = event => { if (event.target === overlay) overlay.remove(); };
 }
 
-async function monitorScan(token) {
+async function monitorScan(token, observedRunning = false) {
   clearTimeout(state.pollTimer);
   try {
     const progress = await api('/api/index/current');
@@ -470,12 +577,12 @@ async function monitorScan(token) {
     bar.hidden = !progress.scanning;
     $('i', bar).style.width = `${progress.percent || 0}%`;
     if (progress.scanning) {
-      state.pollTimer = setTimeout(() => monitorScan(token), 750);
-    } else if (state.total === 0) {
+      state.pollTimer = setTimeout(() => monitorScan(token, true), 750);
+    } else if (observedRunning) {
       await showGallery();
     }
   } catch {
-    state.pollTimer = setTimeout(() => monitorScan(token), 2000);
+    state.pollTimer = setTimeout(() => monitorScan(token, observedRunning), 2000);
   }
 }
 
@@ -694,10 +801,15 @@ function bindSwipe(pane, index) {
   });
 }
 
-function move(paneIndex, delta) {
+async function move(paneIndex, delta) {
   const current = state.viewer[paneIndex];
-  const index = state.items.findIndex(item => item.id === current);
-  const next = state.items[index + delta];
+  let index = state.items.findIndex(item => item.id === current);
+  let next = state.items[index + delta];
+  while (!next && delta > 0 && state.nextOffset >= 0) {
+    if (!await loadNextPage()) return;
+    index = state.items.findIndex(item => item.id === current);
+    next = state.items[index + delta];
+  }
   if (next) openViewer(next.id, paneIndex);
 }
 
@@ -1036,6 +1148,7 @@ window.addEventListener('message', event => {
 });
 
 window.addEventListener('resize', () => {
+  scheduleRiverLayout();
   if (innerWidth < 768 && state.split) {
     state.split = false;
     if (state.viewer[0]) renderViewer();

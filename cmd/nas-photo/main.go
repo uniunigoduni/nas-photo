@@ -50,6 +50,8 @@ type Item struct {
 	Kind     string    `json:"kind"`
 	Size     int64     `json:"size"`
 	Modified time.Time `json:"modified"`
+	Width    int       `json:"width,omitempty"`
+	Height   int       `json:"height,omitempty"`
 }
 type Settings struct {
 	Password  string            `json:"password,omitempty"`
@@ -528,6 +530,8 @@ type catalogItem struct {
 	Kind     string    `json:"kind"`
 	Size     int64     `json:"size"`
 	Modified time.Time `json:"modified"`
+	Width    int       `json:"width,omitempty"`
+	Height   int       `json:"height,omitempty"`
 }
 
 func (a *app) loadCatalog() {
@@ -544,6 +548,7 @@ func (a *app) loadCatalog() {
 		items = append(items, Item{
 			ID: item.ID, RootID: item.RootID, Path: item.Path, Name: item.Name,
 			Kind: item.Kind, Size: item.Size, Modified: item.Modified,
+			Width: item.Width, Height: item.Height,
 		})
 	}
 	a.items = items
@@ -555,6 +560,7 @@ func (a *app) saveCatalog(items []Item) {
 		stored = append(stored, catalogItem{
 			ID: item.ID, RootID: item.RootID, Path: item.Path, Name: item.Name,
 			Kind: item.Kind, Size: item.Size, Modified: item.Modified,
+			Width: item.Width, Height: item.Height,
 		})
 	}
 	data, err := json.Marshal(stored)
@@ -606,7 +612,11 @@ func (a *app) rescan(ctx context.Context) {
 			a.scanTotal++
 			a.scanDone++
 			a.scanMu.Unlock()
-			found = append(found, Item{ID: stableID(root.ID, rel), RootID: root.ID, Path: path, Name: d.Name(), Kind: k, Size: info.Size(), Modified: info.ModTime()})
+			width, height := mediaDimensions(path, k)
+			found = append(found, Item{
+				ID: stableID(root.ID, rel), RootID: root.ID, Path: path, Name: d.Name(),
+				Kind: k, Size: info.Size(), Modified: info.ModTime(), Width: width, Height: height,
+			})
 			return nil
 		})
 	}
@@ -617,6 +627,23 @@ func (a *app) rescan(ctx context.Context) {
 	a.scanMu.Unlock()
 	a.saveCatalog(found)
 }
+
+func mediaDimensions(path, mediaKind string) (int, int) {
+	if mediaKind == "video" {
+		return 0, 0
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return 0, 0
+	}
+	defer file.Close()
+	config, _, err := image.DecodeConfig(file)
+	if err != nil || config.Width <= 0 || config.Height <= 0 {
+		return 0, 0
+	}
+	return config.Width, config.Height
+}
+
 func stableID(root, rel string) string {
 	h := sha256.Sum256([]byte(root + "\x00" + rel))
 	return base64.RawURLEncoding.EncodeToString(h[:12])
