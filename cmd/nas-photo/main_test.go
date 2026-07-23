@@ -105,6 +105,34 @@ func TestBulkThumbnailGenerationOnlyCreatesMissingFiles(t *testing.T) {
 	}
 }
 
+func TestThumbnailRegenerationReplacesCachedFile(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "source.jpg")
+	writeTestJPEG(t, source, 800, 400)
+	item := Item{ID: "image", Path: source, Name: "source.jpg", Kind: "image", Size: 1, Modified: time.Now()}
+	a := &app{cacheDir: filepath.Join(dir, "cache"), items: []Item{item}}
+	if err := os.MkdirAll(a.cacheDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	_, target := a.thumbnailPath(item)
+	if err := os.WriteFile(target, []byte("stale thumbnail"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	a.regenerateThumbnails()
+	f, err := os.Open(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if _, _, err := image.Decode(f); err != nil {
+		t.Fatalf("regenerated thumbnail is not a valid image: %v", err)
+	}
+	if a.thumbnailing || a.thumbDone != 1 || a.thumbTotal != 1 || a.thumbErrors != 0 {
+		t.Fatalf("unexpected regeneration progress: running=%v done=%d total=%d errors=%d",
+			a.thumbnailing, a.thumbDone, a.thumbTotal, a.thumbErrors)
+	}
+}
+
 func TestDefaultSplitToggleShortcut(t *testing.T) {
 	if got := defaults()["splitToggle"]; got != "KeyE" {
 		t.Fatalf("unexpected split toggle shortcut: %q", got)

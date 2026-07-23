@@ -33,6 +33,7 @@ const messages = {
     mediaTip:'Open this media', sortBasis:'Sort by', order:'Order', display:'Layout', size:'Size',
     mediaType:'Media type', index:'Library index', rescanNow:'Scan media folders',
     thumbnails:'Thumbnails', generateThumbnails:'Generate all missing thumbnails',
+    regenerateThumbnails:'Regenerate all thumbnails',
     leftFrame:'Left NAS-PHOTO screen', rightFrame:'Right NAS-PHOTO screen',
     endSplit:'End split view', selectRightMedia:'Select media for this screen', mediaError:'Could not load this media.',
     backGallery:'Back to gallery', addSplit:'Add an independent screen on the right',
@@ -81,6 +82,7 @@ const messages = {
     mediaTip:'このメディアを表示', sortBasis:'基準', order:'順序', display:'表示方法', size:'大きさ',
     mediaType:'表示する種類', index:'索引', rescanNow:'メディアフォルダをスキャン',
     thumbnails:'サムネイル', generateThumbnails:'未作成のサムネイルを一括生成',
+    regenerateThumbnails:'サムネイルをすべて再生成',
     leftFrame:'左側のNAS-PHOTO画面', rightFrame:'右側のNAS-PHOTO画面',
     endSplit:'画面分割を解除', selectRightMedia:'右画面のメディアを選択', mediaError:'メディアを読み込めません。',
     backGallery:'一覧へ戻る', addSplit:'独立した画面を右側に追加',
@@ -136,6 +138,7 @@ const state = {
   galleryWidth: 0,
   aspectRatios: new Map(),
   pageLoadRequest: null,
+  thumbnailVersion: 0,
   pollTimer: null,
   controlsTimer: null,
   controlsHideAt: 0,
@@ -479,7 +482,7 @@ function renderTiles(append = false) {
 }
 
 function tileHTML(item) {
-  const thumb = `/api/media/${item.id}/thumbnail`;
+  const thumb = `/api/media/${item.id}/thumbnail${state.thumbnailVersion ? `?v=${state.thumbnailVersion}` : ''}`;
   const knownRatio = item.kind === 'video'
     ? 1
     : Number(item.width) > 0 && Number(item.height) > 0
@@ -571,10 +574,14 @@ function bindGalleryControls() {
   ], value => { state.filter = value; savePreferences(); showGallery(); });
   $('#scan-menu').onclick = () => optionDialog(t('rescan'), [
     [t('index'), [[t('rescanNow'), 'scan']]],
-    [t('thumbnails'), [[t('generateThumbnails'), 'thumbnails']]]
+    [t('thumbnails'), [
+      [t('generateThumbnails'), 'thumbnails'],
+      [t('regenerateThumbnails'), 'regenerate-thumbnails']
+    ]]
   ], async value => {
     if (value === 'scan') await api('/api/index/rescan', {method: 'POST'});
     if (value === 'thumbnails') await api('/api/thumbnails/generate', {method: 'POST'});
+    if (value === 'regenerate-thumbnails') await api('/api/thumbnails/regenerate', {method: 'POST'});
     monitorScan(state.galleryToken);
   });
   $('#settings').onclick = showSettingsHome;
@@ -596,7 +603,7 @@ function optionDialog(title, sections, onSelect) {
   overlay.onclick = event => { if (event.target === overlay) overlay.remove(); };
 }
 
-async function monitorScan(token, observedRunning = false) {
+async function monitorScan(token, observedRunning = false, observedThumbnailing = false) {
   clearTimeout(state.pollTimer);
   try {
     const progress = await api('/api/index/current');
@@ -610,12 +617,19 @@ async function monitorScan(token, observedRunning = false) {
     bar.classList.toggle('indeterminate', progress.scanning && !progress.total);
     $('i', bar).style.width = `${progress.thumbnailing ? thumbnailPercent : (progress.percent || 0)}%`;
     if (working) {
-      state.pollTimer = setTimeout(() => monitorScan(token, observedRunning || progress.scanning), 750);
+      state.pollTimer = setTimeout(() => monitorScan(
+        token,
+        observedRunning || progress.scanning,
+        observedThumbnailing || progress.thumbnailing
+      ), 750);
     } else if (observedRunning) {
       if (progress.phase === 'ready') await refreshGalleryItems();
+    } else if (observedThumbnailing) {
+      state.thumbnailVersion = Date.now();
+      renderTiles(false);
     }
   } catch {
-    state.pollTimer = setTimeout(() => monitorScan(token, observedRunning), 2000);
+    state.pollTimer = setTimeout(() => monitorScan(token, observedRunning, observedThumbnailing), 2000);
   }
 }
 

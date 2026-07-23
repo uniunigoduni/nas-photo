@@ -248,6 +248,7 @@ func (a *app) routes(m *http.ServeMux) {
 	m.HandleFunc("/api/index/current", a.index)
 	m.HandleFunc("/api/index/rescan", a.rescanAPI)
 	m.HandleFunc("/api/thumbnails/generate", a.generateThumbnailsAPI)
+	m.HandleFunc("/api/thumbnails/regenerate", a.regenerateThumbnailsAPI)
 	m.HandleFunc("/api/settings", a.settings)
 	m.HandleFunc("/api/settings/shortcuts", a.shortcuts)
 	m.HandleFunc("/api/settings/reset", a.reset)
@@ -969,6 +970,14 @@ func (a *app) thumbnailPath(it Item) (string, string) {
 }
 
 func (a *app) generateThumbnailsAPI(w http.ResponseWriter, r *http.Request) {
+	a.startThumbnailGeneration(w, r, false)
+}
+
+func (a *app) regenerateThumbnailsAPI(w http.ResponseWriter, r *http.Request) {
+	a.startThumbnailGeneration(w, r, true)
+}
+
+func (a *app) startThumbnailGeneration(w http.ResponseWriter, r *http.Request, regenerate bool) {
 	if !a.authed(w, r) {
 		return
 	}
@@ -987,39 +996,44 @@ func (a *app) generateThumbnailsAPI(w http.ResponseWriter, r *http.Request) {
 	a.thumbTotal = 0
 	a.thumbErrors = 0
 	a.scanMu.Unlock()
-	go a.generateMissingThumbnails()
+	go a.generateThumbnails(regenerate)
 	jsonOut(w, map[string]bool{"ok": true})
 }
 
 func (a *app) generateMissingThumbnails() {
+	a.generateThumbnails(false)
+}
+
+func (a *app) regenerateThumbnails() {
+	a.generateThumbnails(true)
+}
+
+func (a *app) generateThumbnails(regenerate bool) {
 	a.scanMu.Lock()
 	items := append([]Item(nil), a.items...)
 	a.thumbDone = 0
 	a.thumbErrors = 0
 	a.scanMu.Unlock()
-	missing := make([]Item, 0, len(items))
-	for _, item := range items {
-		_, path := a.thumbnailPath(item)
-		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-			missing = append(missing, item)
+	targets := items
+	if !regenerate {
+		targets = make([]Item, 0, len(items))
+		for _, item := range items {
+			_, path := a.thumbnailPath(item)
+			if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+				targets = append(targets, item)
+			}
 		}
 	}
 	a.scanMu.Lock()
-	a.thumbTotal = len(missing)
+	a.thumbTotal = len(targets)
 	a.scanMu.Unlock()
-	for _, item := range missing {
+	for _, item := range targets {
 		_, target := a.thumbnailPath(item)
 		a.thumbMu.Lock()
 		_, statErr := os.Stat(target)
 		var err error
-		if errors.Is(statErr, os.ErrNotExist) {
-			if item.Kind == "video" {
-				ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-				err = makeVideoThumbnail(ctx, item.Path, target)
-				cancel()
-			} else {
-				err = makeImageThumbnail(item.Path, target)
-			}
+		if regenerate || errors.Is(statErr, os.ErrNotExist) {
+			err = a.generateThumbnailFile(item, target, regenerate)
 		}
 		a.thumbMu.Unlock()
 		a.scanMu.Lock()
@@ -1033,6 +1047,37 @@ func (a *app) generateMissingThumbnails() {
 	a.scanMu.Lock()
 	a.thumbnailing = false
 	a.scanMu.Unlock()
+}
+
+func (a *app) generateThumbnailFile(item Item, target string, replace bool) error {
+	output := target
+	if replace {
+		temp, err := os.CreateTemp(a.cacheDir, ".thumbnail-*.jpg")
+		if err != nil {
+			return err
+		}
+		output = temp.Name()
+		if err := temp.Close(); err != nil {
+			_ = os.Remove(output)
+			return err
+		}
+		defer os.Remove(output)
+	}
+	var err error
+	if item.Kind == "video" {
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		err = makeVideoThumbnail(ctx, item.Path, output)
+		cancel()
+	} else {
+		err = makeImageThumbnail(item.Path, output)
+	}
+	if err != nil || !replace {
+		return err
+	}
+	if err := os.Remove(target); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return os.Rename(output, target)
 }
 
 func makeImageThumbnail(source, target string) error {
