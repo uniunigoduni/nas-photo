@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"database/sql"
 	"embed"
 	"encoding/base64"
 	"encoding/json"
@@ -32,6 +33,9 @@ import (
 	"time"
 
 	"golang.org/x/crypto/argon2"
+	_ "golang.org/x/image/bmp"
+	xdraw "golang.org/x/image/draw"
+	_ "golang.org/x/image/webp"
 )
 
 //go:embed web/*
@@ -71,10 +75,17 @@ type app struct {
 	items               []Item
 	scanning            bool
 	scanDone, scanTotal int
+	scanPhase           string
+	scanErrors          []string
+	thumbnailing        bool
+	thumbDone           int
+	thumbTotal          int
+	thumbErrors         int
 	sessions            map[string]time.Time
 	sessionMu           sync.Mutex
 	cacheDir            string
 	catalogFile         string
+	db                  *sql.DB
 	thumbMu             sync.Mutex
 }
 
@@ -92,9 +103,14 @@ func main() {
 	}
 	s := &store{file: filepath.Join(*data, "settings.json"), Settings: Settings{Shortcuts: defaults()}}
 	_ = s.load()
+	indexDB, err := openIndexDB(filepath.Join(*data, "index.db"))
+	if err != nil {
+		panic(err)
+	}
+	defer indexDB.Close()
 	a := &app{
 		st: s, log: slog.Default(), sessions: map[string]time.Time{},
-		cacheDir: *cache, catalogFile: filepath.Join(*data, "catalog.json"),
+		cacheDir: *cache, catalogFile: filepath.Join(*data, "catalog.json"), db: indexDB,
 	}
 	for _, p := range strings.Split(*allowed, ",") {
 		if p = strings.TrimSpace(p); p != "" {
@@ -231,6 +247,7 @@ func (a *app) routes(m *http.ServeMux) {
 	m.HandleFunc("/api/media/", a.mediaByID)
 	m.HandleFunc("/api/index/current", a.index)
 	m.HandleFunc("/api/index/rescan", a.rescanAPI)
+	m.HandleFunc("/api/thumbnails/generate", a.generateThumbnailsAPI)
 	m.HandleFunc("/api/settings", a.settings)
 	m.HandleFunc("/api/settings/shortcuts", a.shortcuts)
 	m.HandleFunc("/api/settings/reset", a.reset)
@@ -535,13 +552,30 @@ type catalogItem struct {
 }
 
 func (a *app) loadCatalog() {
+	items, err := loadIndexedItems(a.db)
+	if err != nil {
+		a.log.Error("could not load media index", "error", err)
+		return
+	}
+	if len(items) == 0 {
+		items = a.importLegacyCatalog()
+		if len(items) > 0 {
+			if replaceIndexedItems(a.db, items) == nil {
+				_ = os.Remove(a.catalogFile)
+			}
+		}
+	}
+	a.items = items
+}
+
+func (a *app) importLegacyCatalog() []Item {
 	data, err := os.ReadFile(a.catalogFile)
 	if err != nil {
-		return
+		return nil
 	}
 	var stored []catalogItem
 	if json.Unmarshal(data, &stored) != nil {
-		return
+		return nil
 	}
 	items := make([]Item, 0, len(stored))
 	for _, item := range stored {
@@ -551,46 +585,78 @@ func (a *app) loadCatalog() {
 			Width: item.Width, Height: item.Height,
 		})
 	}
-	a.items = items
-}
-
-func (a *app) saveCatalog(items []Item) {
-	stored := make([]catalogItem, 0, len(items))
-	for _, item := range items {
-		stored = append(stored, catalogItem{
-			ID: item.ID, RootID: item.RootID, Path: item.Path, Name: item.Name,
-			Kind: item.Kind, Size: item.Size, Modified: item.Modified,
-			Width: item.Width, Height: item.Height,
-		})
-	}
-	data, err := json.Marshal(stored)
-	if err != nil {
-		return
-	}
-	tmp := a.catalogFile + ".tmp"
-	if os.WriteFile(tmp, data, 0600) == nil {
-		_ = os.Rename(tmp, a.catalogFile)
-	}
+	return items
 }
 
 func (a *app) rescan(ctx context.Context) {
-	a.scanMu.Lock()
-	if a.scanning {
-		a.scanMu.Unlock()
+	if !a.beginScan() {
 		return
+	}
+	a.runScan(ctx)
+}
+
+func (a *app) beginScan() bool {
+	a.scanMu.Lock()
+	defer a.scanMu.Unlock()
+	if a.scanning {
+		return false
 	}
 	a.scanning = true
 	a.scanDone = 0
 	a.scanTotal = 0
-	a.scanMu.Unlock()
-	defer func() { a.scanMu.Lock(); a.scanning = false; a.scanMu.Unlock() }()
+	a.scanPhase = "discovering"
+	a.scanErrors = nil
+	return true
+}
+
+func (a *app) runScan(ctx context.Context) {
+	defer func() {
+		a.scanMu.Lock()
+		a.scanning = false
+		a.scanPhase = "ready"
+		a.scanMu.Unlock()
+	}()
 	a.st.mu.RLock()
 	roots := append([]Root(nil), a.st.Roots...)
 	a.st.mu.RUnlock()
-	var found []Item
+	a.scanMu.Lock()
+	existing := make(map[string]Item, len(a.items))
+	for _, item := range a.items {
+		existing[item.ID] = item
+	}
+	a.scanMu.Unlock()
+	scanID := strconv.FormatInt(time.Now().UnixNano(), 36)
+	successfulRoots := make([]string, 0, len(roots))
 	for _, root := range roots {
-		_ = filepath.WalkDir(root.Path, func(path string, d fs.DirEntry, e error) error {
+		if ctx.Err() != nil {
+			break
+		}
+		info, err := os.Stat(root.Path)
+		if err != nil || !info.IsDir() {
+			a.addScanError(fmt.Sprintf("%s: unavailable", root.Name))
+			continue
+		}
+		rootFailed := false
+		batch := make([]Item, 0, 200)
+		flush := func() bool {
+			if len(batch) == 0 {
+				return true
+			}
+			if err := stageIndexedItems(a.db, scanID, batch); err != nil {
+				a.addScanError(fmt.Sprintf("%s: %v", root.Name, err))
+				rootFailed = true
+				return false
+			}
+			batch = batch[:0]
+			return true
+		}
+		walkErr := filepath.WalkDir(root.Path, func(path string, d fs.DirEntry, e error) error {
 			if e != nil {
+				rootFailed = true
+				a.addScanError(fmt.Sprintf("%s: %v", root.Name, e))
+				if d != nil && d.IsDir() {
+					return fs.SkipDir
+				}
 				return nil
 			}
 			if d.IsDir() {
@@ -609,28 +675,64 @@ func (a *app) rescan(ctx context.Context) {
 				return nil
 			}
 			a.scanMu.Lock()
-			a.scanTotal++
 			a.scanDone++
 			a.scanMu.Unlock()
-			width, height := mediaDimensions(path, k)
-			found = append(found, Item{
-				ID: stableID(root.ID, rel), RootID: root.ID, Path: path, Name: d.Name(),
+			width, height := 0, 0
+			id := stableID(root.ID, rel)
+			if old, ok := existing[id]; ok && old.Size == info.Size() && old.Modified.Equal(info.ModTime()) {
+				width, height = old.Width, old.Height
+			} else {
+				width, height = mediaDimensions(path, k)
+			}
+			batch = append(batch, Item{
+				ID: id, RootID: root.ID, Path: path, Name: d.Name(),
 				Kind: k, Size: info.Size(), Modified: info.ModTime(), Width: width, Height: height,
 			})
+			if len(batch) >= cap(batch) && !flush() {
+				return fs.SkipAll
+			}
 			return nil
 		})
+		if walkErr != nil && !errors.Is(walkErr, fs.SkipAll) {
+			rootFailed = true
+			a.addScanError(fmt.Sprintf("%s: %v", root.Name, walkErr))
+		}
+		if !rootFailed && flush() {
+			successfulRoots = append(successfulRoots, root.ID)
+		} else {
+			_ = discardStagedRoot(a.db, scanID, root.ID)
+		}
+	}
+	a.scanMu.Lock()
+	a.scanPhase = "committing"
+	a.scanMu.Unlock()
+	if len(roots) == 0 {
+		if err := replaceIndexedItems(a.db, nil); err != nil {
+			a.addScanError(err.Error())
+		}
+	} else if len(successfulRoots) > 0 {
+		if err := commitStagedScan(a.db, scanID, successfulRoots); err != nil {
+			a.addScanError(err.Error())
+		}
+	}
+	_ = discardScan(a.db, scanID)
+	found, err := loadIndexedItems(a.db)
+	if err != nil {
+		a.addScanError(err.Error())
+		return
 	}
 	a.scanMu.Lock()
 	a.items = found
 	a.scanDone = len(found)
 	a.scanTotal = len(found)
 	a.scanMu.Unlock()
-	a.saveCatalog(found)
 }
 
 func mediaDimensions(path, mediaKind string) (int, int) {
 	if mediaKind == "video" {
-		return 0, 0
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		return videoDimensions(ctx, path)
 	}
 	file, err := os.Open(path)
 	if err != nil {
@@ -644,6 +746,34 @@ func mediaDimensions(path, mediaKind string) (int, int) {
 	return config.Width, config.Height
 }
 
+func videoDimensions(ctx context.Context, path string) (int, int) {
+	out, err := exec.CommandContext(ctx, "ffprobe",
+		"-v", "error", "-select_streams", "v:0",
+		"-show_entries", "stream=width,height",
+		"-of", "json", path).Output()
+	if err != nil {
+		return 0, 0
+	}
+	var result struct {
+		Streams []struct {
+			Width  int `json:"width"`
+			Height int `json:"height"`
+		} `json:"streams"`
+	}
+	if json.Unmarshal(out, &result) != nil || len(result.Streams) == 0 {
+		return 0, 0
+	}
+	return result.Streams[0].Width, result.Streams[0].Height
+}
+
+func (a *app) addScanError(message string) {
+	a.scanMu.Lock()
+	defer a.scanMu.Unlock()
+	if len(a.scanErrors) < 20 {
+		a.scanErrors = append(a.scanErrors, message)
+	}
+}
+
 func stableID(root, rel string) string {
 	h := sha256.Sum256([]byte(root + "\x00" + rel))
 	return base64.RawURLEncoding.EncodeToString(h[:12])
@@ -654,19 +784,34 @@ func (a *app) index(w http.ResponseWriter, r *http.Request) {
 	}
 	a.scanMu.Lock()
 	defer a.scanMu.Unlock()
-	jsonOut(w, map[string]any{"scanning": a.scanning, "done": a.scanDone, "total": a.scanTotal, "percent": func() int {
-		if a.scanTotal == 0 {
-			return 100
-		}
-		return a.scanDone * 100 / a.scanTotal
-	}()})
+	jsonOut(w, map[string]any{
+		"scanning": a.scanning, "phase": a.scanPhase, "done": a.scanDone, "total": a.scanTotal,
+		"errors":       append([]string(nil), a.scanErrors...),
+		"thumbnailing": a.thumbnailing, "thumbnailDone": a.thumbDone,
+		"thumbnailTotal": a.thumbTotal, "thumbnailErrors": a.thumbErrors,
+		"percent": func() int {
+			if a.scanTotal == 0 {
+				if a.scanning {
+					return 0
+				}
+				return 100
+			}
+			return a.scanDone * 100 / a.scanTotal
+		}()})
 }
 func (a *app) rescanAPI(w http.ResponseWriter, r *http.Request) {
 	if !a.authed(w, r) {
 		return
 	}
-	go a.rescan(r.Context())
-	jsonOut(w, map[string]bool{"ok": true})
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	started := a.beginScan()
+	if started {
+		go a.runScan(context.Background())
+	}
+	jsonOut(w, map[string]bool{"ok": true, "started": started})
 }
 func (a *app) media(w http.ResponseWriter, r *http.Request) {
 	if !a.authed(w, r) {
@@ -786,15 +931,20 @@ func (a *app) mediaByID(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *app) thumbnail(w http.ResponseWriter, r *http.Request, it Item) {
-	key := fmt.Sprintf("%s-%d-%d.jpg", it.ID, it.Size, it.Modified.UnixNano())
-	path := filepath.Join(a.cacheDir, key)
+	key, path := a.thumbnailPath(it)
 	a.thumbMu.Lock()
 	defer a.thumbMu.Unlock()
 	if _, err := os.Stat(path); err != nil {
+		var makeErr error
 		if it.Kind == "video" {
-			_ = makeVideoThumbnail(r.Context(), it.Path, path)
+			ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
+			makeErr = makeVideoThumbnail(ctx, it.Path, path)
+			cancel()
 		} else {
-			_ = makeImageThumbnail(it.Path, path)
+			makeErr = makeImageThumbnail(it.Path, path)
+		}
+		if makeErr != nil {
+			a.log.Warn("thumbnail generation failed", "path", it.Path, "error", makeErr)
 		}
 	}
 	f, err := os.Open(path)
@@ -811,6 +961,78 @@ func (a *app) thumbnail(w http.ResponseWriter, r *http.Request, it Item) {
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.Header().Set("Cache-Control", "private, max-age=86400")
 	http.ServeContent(w, r, key, info.ModTime(), f)
+}
+
+func (a *app) thumbnailPath(it Item) (string, string) {
+	key := fmt.Sprintf("%s-%d-%d.jpg", it.ID, it.Size, it.Modified.UnixNano())
+	return key, filepath.Join(a.cacheDir, key)
+}
+
+func (a *app) generateThumbnailsAPI(w http.ResponseWriter, r *http.Request) {
+	if !a.authed(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	a.scanMu.Lock()
+	if a.thumbnailing {
+		a.scanMu.Unlock()
+		jsonOut(w, map[string]bool{"ok": true, "alreadyRunning": true})
+		return
+	}
+	a.thumbnailing = true
+	a.thumbDone = 0
+	a.thumbTotal = 0
+	a.thumbErrors = 0
+	a.scanMu.Unlock()
+	go a.generateMissingThumbnails()
+	jsonOut(w, map[string]bool{"ok": true})
+}
+
+func (a *app) generateMissingThumbnails() {
+	a.scanMu.Lock()
+	items := append([]Item(nil), a.items...)
+	a.thumbDone = 0
+	a.thumbErrors = 0
+	a.scanMu.Unlock()
+	missing := make([]Item, 0, len(items))
+	for _, item := range items {
+		_, path := a.thumbnailPath(item)
+		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+			missing = append(missing, item)
+		}
+	}
+	a.scanMu.Lock()
+	a.thumbTotal = len(missing)
+	a.scanMu.Unlock()
+	for _, item := range missing {
+		_, target := a.thumbnailPath(item)
+		a.thumbMu.Lock()
+		_, statErr := os.Stat(target)
+		var err error
+		if errors.Is(statErr, os.ErrNotExist) {
+			if item.Kind == "video" {
+				ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+				err = makeVideoThumbnail(ctx, item.Path, target)
+				cancel()
+			} else {
+				err = makeImageThumbnail(item.Path, target)
+			}
+		}
+		a.thumbMu.Unlock()
+		a.scanMu.Lock()
+		a.thumbDone++
+		if err != nil {
+			a.thumbErrors++
+			a.log.Warn("bulk thumbnail generation failed", "path", item.Path, "error", err)
+		}
+		a.scanMu.Unlock()
+	}
+	a.scanMu.Lock()
+	a.thumbnailing = false
+	a.scanMu.Unlock()
 }
 
 func makeImageThumbnail(source, target string) error {
@@ -840,11 +1062,7 @@ func makeImageThumbnail(source, target string) error {
 		}
 	}
 	dst := image.NewRGBA(image.Rect(0, 0, tw, th))
-	for y := 0; y < th; y++ {
-		for x := 0; x < tw; x++ {
-			dst.Set(x, y, img.At(b.Min.X+x*w/tw, b.Min.Y+y*h/th))
-		}
-	}
+	xdraw.CatmullRom.Scale(dst, dst.Bounds(), img, b, xdraw.Over, nil)
 	tmp := target + ".tmp"
 	out, err := os.Create(tmp)
 	if err != nil {
@@ -957,8 +1175,18 @@ func (a *app) reset(w http.ResponseWriter, r *http.Request) {
 	a.st.mu.Unlock()
 	a.scanMu.Lock()
 	a.items = nil
+	a.scanErrors = nil
 	a.scanMu.Unlock()
+	_ = replaceIndexedItems(a.db, nil)
+	_ = clearStagedScans(a.db)
 	_ = os.Remove(a.catalogFile)
+	if entries, err := os.ReadDir(a.cacheDir); err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				_ = os.Remove(filepath.Join(a.cacheDir, entry.Name()))
+			}
+		}
+	}
 	a.sessionMu.Lock()
 	a.sessions = map[string]time.Time{}
 	a.sessionMu.Unlock()

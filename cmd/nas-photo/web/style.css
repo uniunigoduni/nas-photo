@@ -90,6 +90,11 @@ label { display: grid; gap: .4rem; color: #dbe5f6; }
   background: #28344e;
 }
 .progress i { display: block; width: 0; height: 100%; background: var(--accent); transition: width .25s; }
+.progress.indeterminate i { width: 35% !important; animation: scan-progress 1.1s ease-in-out infinite; }
+@keyframes scan-progress {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(320%); }
+}
 .selection-summary {
   padding: .6rem 1rem 0;
   color: #aebbd0;

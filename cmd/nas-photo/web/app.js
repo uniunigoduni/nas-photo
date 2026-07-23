@@ -23,15 +23,16 @@ const messages = {
     selectThisFolder:'Select this folder', parentFolder:'Parent folder', noChildren:'No subfolders.', cancel:'Cancel', close:'Close',
     login:'Sign in', foldersResume:'Your password is already set. Sign in to continue folder setup.',
     loginError:'Enter the password you configured.',
-    sort:'Sort', view:'View', filter:'Filter', rescan:'Rescan', settings:'Settings',
+    sort:'Sort', view:'View', filter:'Filter', rescan:'Scan', settings:'Settings',
     sortTip:'Change the sort order', viewTip:'Change gallery layout and size', filterTip:'Filter media types',
-    rescanTip:'Rescan the media library', settingsTip:'Open settings', loading:'Loading…',
+    rescanTip:'Scan the media library or generate thumbnails', settingsTip:'Open settings', loading:'Loading…',
     noMedia:'No media matches these conditions.',
     captured:'Date captured', created:'Date created', modified:'Date modified', name:'Name',
     all:'All', images:'Images & GIFs', videos:'Videos', ascending:'Ascending', descending:'Descending',
     river:'River', square:'Square', small:'Small', medium:'Medium', large:'Large',
     mediaTip:'Open this media', sortBasis:'Sort by', order:'Order', display:'Layout', size:'Size',
-    mediaType:'Media type', index:'Library index', rescanNow:'Rescan now',
+    mediaType:'Media type', index:'Library index', rescanNow:'Scan media folders',
+    thumbnails:'Thumbnails', generateThumbnails:'Generate all missing thumbnails',
     leftFrame:'Left NAS-PHOTO screen', rightFrame:'Right NAS-PHOTO screen',
     endSplit:'End split view', selectRightMedia:'Select media for this screen', mediaError:'Could not load this media.',
     backGallery:'Back to gallery', addSplit:'Add an independent screen on the right',
@@ -70,15 +71,16 @@ const messages = {
     selectThisFolder:'このフォルダを選択', parentFolder:'親フォルダ', noChildren:'子フォルダはありません。', cancel:'キャンセル', close:'閉じる',
     login:'ログイン', foldersResume:'パスワード設定済みです。ログイン後、フォルダ設定を再開します。',
     loginError:'設定済みのパスワードを入力してください。',
-    sort:'ソート', view:'種類とサイズ', filter:'フィルター', rescan:'再スキャン', settings:'設定',
+    sort:'ソート', view:'種類とサイズ', filter:'フィルター', rescan:'スキャン', settings:'設定',
     sortTip:'並び順を変更', viewTip:'一覧の表示方法とサイズを変更', filterTip:'表示するメディアの種類を絞り込み',
-    rescanTip:'メディア一覧を再スキャン', settingsTip:'設定を開く', loading:'読み込んでいます…',
+    rescanTip:'メディアのスキャンまたはサムネイルの一括生成', settingsTip:'設定を開く', loading:'読み込んでいます…',
     noMedia:'条件に一致するメディアはありません。',
     captured:'撮影日', created:'作成日', modified:'変更日', name:'名前',
     all:'すべて', images:'画像・GIF', videos:'動画', ascending:'昇順', descending:'降順',
     river:'リバー', square:'正方形', small:'小', medium:'中', large:'大',
     mediaTip:'このメディアを表示', sortBasis:'基準', order:'順序', display:'表示方法', size:'大きさ',
-    mediaType:'表示する種類', index:'索引', rescanNow:'今すぐ再スキャン',
+    mediaType:'表示する種類', index:'索引', rescanNow:'メディアフォルダをスキャン',
+    thumbnails:'サムネイル', generateThumbnails:'未作成のサムネイルを一括生成',
     leftFrame:'左側のNAS-PHOTO画面', rightFrame:'右側のNAS-PHOTO画面',
     endSplit:'画面分割を解除', selectRightMedia:'右画面のメディアを選択', mediaError:'メディアを読み込めません。',
     backGallery:'一覧へ戻る', addSplit:'独立した画面を右側に追加',
@@ -568,9 +570,11 @@ function bindGalleryControls() {
     [t('mediaType'), [[t('all'), ''], [t('images'), 'image'], [t('videos'), 'video']]]
   ], value => { state.filter = value; savePreferences(); showGallery(); });
   $('#scan-menu').onclick = () => optionDialog(t('rescan'), [
-    [t('index'), [[t('rescanNow'), 'scan']]]
-  ], async () => {
-    await api('/api/index/rescan', {method: 'POST'});
+    [t('index'), [[t('rescanNow'), 'scan']]],
+    [t('thumbnails'), [[t('generateThumbnails'), 'thumbnails']]]
+  ], async value => {
+    if (value === 'scan') await api('/api/index/rescan', {method: 'POST'});
+    if (value === 'thumbnails') await api('/api/thumbnails/generate', {method: 'POST'});
     monitorScan(state.galleryToken);
   });
   $('#settings').onclick = showSettingsHome;
@@ -598,12 +602,17 @@ async function monitorScan(token, observedRunning = false) {
     const progress = await api('/api/index/current');
     if (token !== state.galleryToken || !$('#gallery')) return;
     const bar = $('.progress');
-    bar.hidden = !progress.scanning;
-    $('i', bar).style.width = `${progress.percent || 0}%`;
-    if (progress.scanning) {
-      state.pollTimer = setTimeout(() => monitorScan(token, true), 750);
+    const working = progress.scanning || progress.thumbnailing;
+    const thumbnailPercent = progress.thumbnailTotal > 0
+      ? Math.round(progress.thumbnailDone * 100 / progress.thumbnailTotal)
+      : 0;
+    bar.hidden = !working;
+    bar.classList.toggle('indeterminate', progress.scanning && !progress.total);
+    $('i', bar).style.width = `${progress.thumbnailing ? thumbnailPercent : (progress.percent || 0)}%`;
+    if (working) {
+      state.pollTimer = setTimeout(() => monitorScan(token, observedRunning || progress.scanning), 750);
     } else if (observedRunning) {
-      await refreshGalleryItems();
+      if (progress.phase === 'ready') await refreshGalleryItems();
     }
   } catch {
     state.pollTimer = setTimeout(() => monitorScan(token, observedRunning), 2000);
