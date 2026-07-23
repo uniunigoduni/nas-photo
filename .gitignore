@@ -1,0 +1,215 @@
+# -----------------------------------------------------------------------------
+# NAS-PHOTO: local plans and temporary work
+# -----------------------------------------------------------------------------
+/.tmp/
+/.temp/
+/tmp/
+/temp/
+*.tmp
+*.temp
+*.bak
+*.old
+*.orig
+*.rej
+*~
+
+# -----------------------------------------------------------------------------
+# Operating-system files
+# -----------------------------------------------------------------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+System Volume Information/
+.directory
+.Trash-*
+.nfs*
+
+# -----------------------------------------------------------------------------
+# Editors and IDEs
+# -----------------------------------------------------------------------------
+.idea/
+.fleet/
+.vscode/
+.vs/
+*.code-workspace
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.swp
+*.swo
+*.kate-swp
+.history/
+
+# -----------------------------------------------------------------------------
+# Environment files, local configuration, and secrets
+# -----------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.local
+config.local.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+/secrets/
+
+# Permit deliberately checked-in, non-production security fixtures.
+!/testdata/**/*.pem
+!/testdata/**/*.key
+!/testdata/**/*.crt
+!/testdata/**/*.cer
+
+# -----------------------------------------------------------------------------
+# Logs, diagnostics, profiles, and crash dumps
+# -----------------------------------------------------------------------------
+*.log
+logs/
+*.pid
+*.pid.lock
+*.seed
+*.stackdump
+*.dmp
+*.core
+core.[0-9]*
+cpu.out
+mem.out
+trace.out
+*.prof
+*.pprof
+
+# -----------------------------------------------------------------------------
+# Go build and test output
+# -----------------------------------------------------------------------------
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+coverage.out
+coverage/
+coverage.*
+*.cover
+*.cov
+/bin/
+/build/
+/dist/
+/release/
+
+# Keep Go module metadata and a future vendor/ directory trackable.
+!go.mod
+!go.sum
+
+# Go development tools
+/.air/
+/.gocache/
+/.gotmp/
+
+# -----------------------------------------------------------------------------
+# Node, Svelte, Vite, and frontend output
+# -----------------------------------------------------------------------------
+node_modules/
+.pnpm-store/
+.npm/
+.yarn/cache/
+.yarn/unplugged/
+.yarn/build-state.yml
+.yarn/install-state.gz
+.pnp.*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+/web/dist/
+/web/.svelte-kit/
+/web/.vite/
+/web/.vercel/
+/web/.netlify/
+/internal/webui/dist/
+*.tsbuildinfo
+.eslintcache
+.stylelintcache
+
+# Keep dependency lockfiles trackable.
+!package-lock.json
+!pnpm-lock.yaml
+!yarn.lock
+
+# -----------------------------------------------------------------------------
+# Test runners and reports
+# -----------------------------------------------------------------------------
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/.nyc_output/
+/junit/
+*.lcov
+
+# -----------------------------------------------------------------------------
+# NAS-PHOTO runtime state (never commit user media metadata or credentials)
+# -----------------------------------------------------------------------------
+/.dev-data/
+/.runtime/
+/.cache/
+/.nas-photo/
+/nas-photo-data/
+/data/
+/storage/
+/thumbnails/
+/previews/
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3
+
+# Migration and integration-test database fixtures are source artifacts.
+!/testdata/**/*.db
+!/testdata/**/*.sqlite
+!/testdata/**/*.sqlite3
+
+# Local FFmpeg downloads; deployment should use a documented system package.
+/tools/ffmpeg/
+/tools/ffprobe/
+
+# -----------------------------------------------------------------------------
+# Packaging and deployment artifacts
+# -----------------------------------------------------------------------------
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.deb
+*.rpm
+*.AppImage
+checksums.txt
+SHA256SUMS
+
+# -----------------------------------------------------------------------------
+# Miscellaneous caches
+# -----------------------------------------------------------------------------
+.cache-loader/
+.parcel-cache/
+.turbo/
+.sass-cache/
+.vite/
+.vitest/
+.node_repl_history
