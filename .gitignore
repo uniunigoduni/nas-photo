@@ -101,6 +101,9 @@ trace.out
 coverage.out
 coverage/
 coverage.*
+coverage.html
+.coverprofile
+*.coverprofile
 *.cover
 *.cov
 /bin/
@@ -167,6 +170,11 @@ pnpm-debug.log*
 /.cache/
 /.nas-photo/
 /nas-photo-data/
+/nas-photo-cache/
+/.verify-state/
+/.verify-cache/
+/nas-photo.exe
+/nas-photo-linux-arm64
 /data/
 /storage/
 /thumbnails/
