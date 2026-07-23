@@ -87,8 +87,71 @@ func TestEmptyGalleryDoesNotRestartScanMonitor(t *testing.T) {
 		t.Fatal("an empty gallery still restarts itself from the scan monitor")
 	}
 	if !strings.Contains(source, "else if (observedRunning)") ||
-		!strings.Contains(source, "await showGallery()") {
+		!strings.Contains(source, "await refreshGalleryItems()") {
 		t.Fatal("gallery is not refreshed once after an observed scan finishes")
+	}
+}
+
+func TestViewerKeepsGalleryMountedWhenOpenedAndClosed(t *testing.T) {
+	content, err := assets.ReadFile("web/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(content)
+	if !strings.Contains(source, "app.append(layer)") ||
+		!strings.Contains(source, "layer.className = 'viewer-layer'") {
+		t.Fatal("viewer is not layered over the existing gallery")
+	}
+	leaveStart := strings.Index(source, "function leaveViewer()")
+	paneStart := strings.Index(source, "function paneHTML(")
+	if leaveStart < 0 || paneStart <= leaveStart {
+		t.Fatal("could not locate viewer close implementation")
+	}
+	leaveSource := source[leaveStart:paneStart]
+	if strings.Contains(leaveSource, "showGallery()") {
+		t.Fatal("closing the viewer still reloads the gallery")
+	}
+	if !strings.Contains(leaveSource, "window.scrollTo(0, scrollY)") {
+		t.Fatal("closing the viewer does not restore the gallery scroll position")
+	}
+}
+
+func TestRiverGalleryDoesNotRelayoutForEveryThumbnail(t *testing.T) {
+	content, err := assets.ReadFile("web/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(content)
+	if !strings.Contains(source, "renderTiles(offset > 0)") ||
+		!strings.Contains(source, "gallery.insertAdjacentHTML('beforeend'") {
+		t.Fatal("additional media pages still rebuild the existing gallery")
+	}
+	if !strings.Contains(source, "gallery.classList.contains('river-pending')") ||
+		!strings.Contains(source, "gallery.classList.remove('river-pending')") {
+		t.Fatal("initial river layout is not hidden until its dimensions are ready")
+	}
+	updateStart := strings.Index(source, "const updateRatio = () =>")
+	if updateStart < 0 {
+		t.Fatal("could not locate thumbnail ratio handling")
+	}
+	errorStart := strings.Index(source[updateStart:], "image.addEventListener('error'")
+	if errorStart < 0 {
+		t.Fatal("could not locate thumbnail ratio handling")
+	}
+	updateSource := source[updateStart : updateStart+errorStart]
+	if strings.Contains(updateSource, "scheduleRiverLayout()") {
+		t.Fatal("each thumbnail still triggers a visible river relayout")
+	}
+	styles, err := assets.ReadFile("web/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(styles), "scrollbar-gutter: stable") {
+		t.Fatal("scrollbar appearance can still change the river layout width")
+	}
+	if !strings.Contains(source, "const knownRatio = item.kind === 'video'") ||
+		!strings.Contains(source, "tile.dataset.kind !== 'video'") {
+		t.Fatal("video tiles are not kept square in the river layout")
 	}
 }
 

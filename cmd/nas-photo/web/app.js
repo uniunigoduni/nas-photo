@@ -137,6 +137,7 @@ const state = {
   pollTimer: null,
   controlsTimer: null,
   controlsHideAt: 0,
+  viewerScrollY: 0,
   zoom: [1, 1]
 };
 document.documentElement.lang = state.language;
@@ -359,6 +360,7 @@ function queryString(offset = 0) {
 async function showGallery() {
   const token = ++state.galleryToken;
   clearTimeout(state.pollTimer);
+  document.body.classList.remove('viewer-open');
   state.items = [];
   state.nextOffset = 0;
   state.pageLoadRequest = null;
@@ -383,13 +385,23 @@ async function showGallery() {
   }
 }
 
+async function refreshGalleryItems() {
+  const token = ++state.galleryToken;
+  state.items = [];
+  state.nextOffset = 0;
+  state.pageLoadRequest = null;
+  await loadPage(0, token);
+  void loadRemainingPages(token);
+  monitorScan(token);
+}
+
 async function loadPage(offset, token = state.galleryToken) {
   const page = await api(`/api/media?${queryString(offset)}`);
   if (token !== state.galleryToken) return;
   state.items = offset === 0 ? (page.items || []) : state.items.concat(page.items || []);
   state.total = page.total || 0;
   state.nextOffset = page.nextOffset;
-  renderTiles();
+  renderTiles(offset > 0);
 }
 
 async function loadNextPage(token = state.galleryToken) {
@@ -424,15 +436,24 @@ async function loadRemainingPages(token = state.galleryToken) {
   }
 }
 
-function renderTiles() {
+function renderTiles(append = false) {
   const gallery = $('#gallery');
   if (!gallery) return;
   state.galleryObserver?.disconnect();
   state.galleryObserver = null;
   state.galleryWidth = 0;
-  gallery.className = `gallery ${state.layout} size-${state.size}`;
-  gallery.innerHTML = state.items.length ? state.items.map(tileHTML).join('') :
-    `<p class="empty">${t('noMedia')}</p>`;
+  const riverPending = state.layout === 'river' && state.items.length && !append;
+  gallery.className = `gallery ${state.layout} size-${state.size}${riverPending ? ' river-pending' : ''}`;
+  const existingTiles = [...gallery.querySelectorAll('.tile')];
+  const canAppend = append && existingTiles.length < state.items.length &&
+    existingTiles.every((tile, index) => tile.dataset.id === state.items[index]?.id);
+  if (!state.items.length) {
+    gallery.innerHTML = `<p class="empty">${t('noMedia')}</p>`;
+  } else if (canAppend) {
+    gallery.insertAdjacentHTML('beforeend', state.items.slice(existingTiles.length).map(tileHTML).join(''));
+  } else {
+    gallery.innerHTML = state.items.map(tileHTML).join('');
+  }
   $$('.tile', gallery).forEach(tile => tile.onclick = () => openViewer(tile.dataset.id, 0));
   bindGalleryThumbnails(gallery);
   if (state.layout === 'river') {
@@ -457,10 +478,12 @@ function renderTiles() {
 
 function tileHTML(item) {
   const thumb = `/api/media/${item.id}/thumbnail`;
-  const knownRatio = Number(item.width) > 0 && Number(item.height) > 0
+  const knownRatio = item.kind === 'video'
+    ? 1
+    : Number(item.width) > 0 && Number(item.height) > 0
     ? Number(item.width) / Number(item.height)
     : state.aspectRatios.get(item.id) || 4 / 3;
-  return `<button class="tile" data-id="${item.id}" data-aspect-ratio="${knownRatio}" aria-label="${escapeHTML(item.name)}" data-tooltip="${t('mediaTip')}">
+  return `<button class="tile" data-id="${item.id}" data-kind="${item.kind}" data-aspect-ratio="${knownRatio}" aria-label="${escapeHTML(item.name)}" data-tooltip="${t('mediaTip')}">
     <span class="thumb-fallback"></span>
     <img src="${thumb}" loading="lazy" decoding="async" alt="">
     ${item.kind === 'video' ? '<span class="play-mark" aria-hidden="true">▶</span>' : ''}
@@ -468,20 +491,20 @@ function tileHTML(item) {
 }
 
 function bindGalleryThumbnails(gallery) {
-  $$('img', gallery).forEach(image => {
+  $$('img:not([data-ratio-bound])', gallery).forEach(image => {
+    image.dataset.ratioBound = '1';
     const tile = image.closest('.tile');
     const updateRatio = () => {
       if (!image.naturalWidth || !image.naturalHeight) return;
       const ratio = image.naturalWidth / image.naturalHeight;
       state.aspectRatios.set(tile.dataset.id, ratio);
-      if (Math.abs(Number(tile.dataset.aspectRatio) - ratio) < 0.001) return;
-      tile.dataset.aspectRatio = String(ratio);
-      scheduleRiverLayout();
+      if (tile.dataset.kind !== 'video' && gallery.classList.contains('river-pending')) {
+        tile.dataset.aspectRatio = String(ratio);
+      }
     };
     image.addEventListener('load', updateRatio, {once: true});
     image.addEventListener('error', () => {
       image.remove();
-      scheduleRiverLayout();
     }, {once: true});
     if (image.complete) updateRatio();
   });
@@ -523,6 +546,7 @@ function layoutRiverGallery() {
     content.append(rowElement);
   });
   gallery.replaceChildren(content);
+  gallery.classList.remove('river-pending');
 }
 
 function bindGalleryControls() {
@@ -579,7 +603,7 @@ async function monitorScan(token, observedRunning = false) {
     if (progress.scanning) {
       state.pollTimer = setTimeout(() => monitorScan(token, true), 750);
     } else if (observedRunning) {
-      await showGallery();
+      await refreshGalleryItems();
     }
   } catch {
     state.pollTimer = setTimeout(() => monitorScan(token, observedRunning), 2000);
@@ -609,7 +633,15 @@ function openViewer(id, paneIndex = 0) {
 
 function renderViewer() {
   const split = state.split && !embeddedMode && innerWidth >= 768;
-  app.innerHTML = split
+  let layer = $('.viewer-layer', app);
+  if (!layer) {
+    state.viewerScrollY = window.scrollY;
+    layer = document.createElement('div');
+    layer.className = 'viewer-layer';
+    app.append(layer);
+    document.body.classList.add('viewer-open');
+  }
+  layer.innerHTML = split
     ? `<main class="viewer is-split">
         <iframe class="split-window split-window-primary" data-role="primary"
           src="${embeddedURL('primary', state.viewer[0])}" title="${t('leftFrame')}"></iframe>
@@ -618,11 +650,11 @@ function renderViewer() {
         <iframe class="split-window split-window-secondary" data-role="secondary"
           src="${embeddedURL('secondary')}" title="${t('rightFrame')}"></iframe>
       </main>`
-    : `<main class="viewer">
+    : `<main class="viewer" role="dialog" aria-modal="true">
         <div class="split-surface">${paneHTML(state.viewer[0], 0)}</div>
       </main>`;
-  if (!split) bindViewerPane($('.split-surface'));
-  $('.end-split')?.addEventListener('click', event => {
+  if (!split) bindViewerPane($('.split-surface', layer));
+  $('.end-split', layer)?.addEventListener('click', event => {
     event.stopPropagation();
     toggleSplit();
   });
@@ -635,7 +667,7 @@ function toggleSplit() {
   }
   if (state.split) {
     state.split = false;
-    if (state.viewer[0]) renderViewer(); else showGallery();
+    if (state.viewer[0]) renderViewer(); else leaveViewer();
     return;
   }
   if (!state.viewer[0] || innerWidth < 768) return;
@@ -666,9 +698,13 @@ function leaveViewer() {
   if (embeddedMode && embeddedRole === 'primary') {
     parent.postMessage({type:'primaryGallery'}, location.origin);
   }
+  const scrollY = state.viewerScrollY;
   state.viewer[0] = null;
+  state.viewer[1] = null;
   state.split = false;
-  showGallery();
+  $('.viewer-layer', app)?.remove();
+  document.body.classList.remove('viewer-open');
+  requestAnimationFrame(() => window.scrollTo(0, scrollY));
 }
 
 function paneHTML(id, index) {
@@ -703,8 +739,7 @@ function bindPane(pane, preserveControls = false) {
   pane.onclick = event => {
     state.activePane = index;
     if (event.target === pane) {
-      state.split = false;
-      showGallery();
+      leaveViewer();
     }
   };
   $('.previous', pane)?.addEventListener('click', event => { event.stopPropagation(); move(index, -1); });
@@ -804,6 +839,11 @@ function bindSwipe(pane, index) {
 async function move(paneIndex, delta) {
   const current = state.viewer[paneIndex];
   let index = state.items.findIndex(item => item.id === current);
+  while (index < 0 && state.nextOffset >= 0) {
+    if (!await loadNextPage()) return;
+    index = state.items.findIndex(item => item.id === current);
+  }
+  if (index < 0) return;
   let next = state.items[index + delta];
   while (!next && delta > 0 && state.nextOffset >= 0) {
     if (!await loadNextPage()) return;
@@ -1151,7 +1191,7 @@ window.addEventListener('resize', () => {
   scheduleRiverLayout();
   if (innerWidth < 768 && state.split) {
     state.split = false;
-    if (state.viewer[0]) renderViewer();
+    if (state.viewer[0]) renderViewer(); else leaveViewer();
   }
 });
 

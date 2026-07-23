@@ -11,7 +11,9 @@
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; width: 100%; min-height: 100%; background: #0b1020; }
+html { scrollbar-gutter: stable; }
 body { min-height: 100vh; }
+body.viewer-open { overflow: hidden; }
 #app { width: 100%; min-height: 100vh; }
 button, input, select { font: inherit; }
 button {
@@ -107,6 +109,8 @@ label { display: grid; gap: .4rem; color: #dbe5f6; }
   --river-gap: 8px;
   display: block;
 }
+.gallery.river.river-pending { visibility: hidden; }
+.gallery.river > .tile { visibility: hidden; }
 .gallery.river.size-small { --river-target-height: 125px; }
 .gallery.river.size-large { --river-target-height: 270px; }
 .river-row {
