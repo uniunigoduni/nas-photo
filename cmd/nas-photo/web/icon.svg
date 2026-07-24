@@ -19,7 +19,7 @@
   <g clip-path="url(#frame)">
     <rect x="32" y="32" width="448" height="448" fill="url(#sky)"/>
 
-    <circle cx="189" cy="154" r="52" fill="#fff4d6"/>
+    <circle cx="200" cy="200" r="90" fill="#fff4d6"/>
 
     <path
       d="M214 480c4-74 36-128 94-171 32-24 63-35 95-35 34 0 60 12 77 32v174Z"
