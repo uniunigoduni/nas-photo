@@ -1,14 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="NAS-PHOTO">
   <defs>
-    <linearGradient id="sky" x1="72" y1="48" x2="444" y2="464" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#20b8e8"/>
-      <stop offset=".52" stop-color="#43a4e4"/>
-      <stop offset="1" stop-color="#8c79e2"/>
+    <linearGradient id="sky" x1="56" y1="64" x2="452" y2="452" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffc46b"/>
+      <stop offset=".52" stop-color="#ff8b94"/>
+      <stop offset="1" stop-color="#8a6be0"/>
     </linearGradient>
-    <linearGradient id="near-mountain" x1="110" y1="210" x2="344" y2="474" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#14549a"/>
-      <stop offset="1" stop-color="#173a70"/>
+
+    <linearGradient id="near-mountain" x1="96" y1="248" x2="380" y2="476" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6b3fa0"/>
+      <stop offset="1" stop-color="#2f275f"/>
     </linearGradient>
+
     <clipPath id="frame">
       <rect x="32" y="32" width="448" height="448" rx="70"/>
     </clipPath>
@@ -16,11 +18,29 @@
 
   <g clip-path="url(#frame)">
     <rect x="32" y="32" width="448" height="448" fill="url(#sky)"/>
-    <circle cx="345" cy="148" r="45" fill="#f8f8f5"/>
 
-    <path d="M244 344 324 263c17-17 44-17 61 0l95 96v121H190Z" fill="#4d70cf"/>
-    <path d="M32 321 164 190c22-22 57-22 79 0l237 237v53H32Z" fill="url(#near-mountain)"/>
+    <circle cx="189" cy="154" r="52" fill="#fff4d6"/>
+
+    <path
+      d="M214 480c4-74 36-128 94-171 32-24 63-35 95-35 34 0 60 12 77 32v174Z"
+      fill="#c95d63"
+    />
+
+    <path
+      d="M32 480V372c30-39 84-64 150-64 80 0 142 27 193 58 37 23 70 32 105 31v83Z"
+      fill="url(#near-mountain)"
+    />
   </g>
 
-  <rect x="33" y="33" width="446" height="446" rx="69" fill="none" stroke="#0b355f" stroke-opacity=".18" stroke-width="2"/>
+  <rect
+    x="33"
+    y="33"
+    width="446"
+    height="446"
+    rx="69"
+    fill="none"
+    stroke="#402447"
+    stroke-opacity=".18"
+    stroke-width="2"
+  />
 </svg>
