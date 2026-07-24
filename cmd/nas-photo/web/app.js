@@ -114,6 +114,8 @@ const DEFAULT_SHORTCUTS = {
   prev1: 'KeyQ', next1: 'KeyW', prev2: 'KeyA', next2: 'KeyS',
   loop: 'KeyL', mute: 'KeyM', splitToggle: 'KeyE'
 };
+const CONTROL_HIDE_DELAY = 2500;
+const TOUCH_CONTROL_HIDE_DELAY = 5000;
 
 const stored = JSON.parse(localStorage.getItem('nas-photo-preferences') || '{}');
 const state = {
@@ -821,20 +823,24 @@ function bindControlVisibility(pane, preserve = false) {
     state.controlsHideAt = 0;
     hideTooltip();
   };
-  const reveal = () => {
+  const reveal = (pointerType = '') => {
+    const delay = pointerType === 'touch' || pointerType === 'pen'
+      ? TOUCH_CONTROL_HIDE_DELAY
+      : CONTROL_HIDE_DELAY;
     pane.classList.add('controls-visible');
     clearTimeout(state.controlsTimer);
-    state.controlsHideAt = performance.now() + 1800;
-    state.controlsTimer = setTimeout(hide, 1800);
+    state.controlsHideAt = performance.now() + delay;
+    state.controlsTimer = setTimeout(hide, delay);
   };
-  pane.addEventListener('pointerenter', reveal);
-  pane.addEventListener('pointermove', reveal);
-  pane.addEventListener('pointerdown', reveal);
-  pane.addEventListener('pointerleave', () => {
+  pane.addEventListener('pointerenter', event => reveal(event.pointerType));
+  pane.addEventListener('pointermove', event => reveal(event.pointerType));
+  pane.addEventListener('pointerdown', event => reveal(event.pointerType));
+  pane.addEventListener('pointerleave', event => {
+    if (event.pointerType !== 'mouse') return;
     clearTimeout(state.controlsTimer);
     hide();
   });
-  pane.addEventListener('focusin', reveal);
+  pane.addEventListener('focusin', () => reveal());
   const remaining = state.controlsHideAt - performance.now();
   if (preserve && remaining > 0) {
     pane.classList.add('controls-visible');
@@ -845,18 +851,36 @@ function bindControlVisibility(pane, preserve = false) {
 }
 
 function bindSwipe(pane, index) {
-  if (innerWidth >= 768) return;
+  let pointerId = null;
   let startX = 0, startY = 0, startTime = 0;
+  let suppressClick = false;
   pane.addEventListener('pointerdown', event => {
+    if (event.button !== 0 || !event.target.closest('.media')) return;
+    const video = event.target.closest('video');
+    if (video && event.clientY >= video.getBoundingClientRect().bottom - 64) return;
+    pointerId = event.pointerId;
     startX = event.clientX; startY = event.clientY; startTime = performance.now();
   });
   pane.addEventListener('pointerup', event => {
+    if (event.pointerId !== pointerId) return;
+    pointerId = null;
     const dx = event.clientX - startX;
     const dy = event.clientY - startY;
-    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.3 && performance.now() - startTime < 700) {
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.3 && performance.now() - startTime < 1000) {
+      suppressClick = true;
+      event.preventDefault();
       move(index, dx < 0 ? 1 : -1);
     }
   });
+  pane.addEventListener('pointercancel', event => {
+    if (event.pointerId === pointerId) pointerId = null;
+  });
+  pane.addEventListener('click', event => {
+    if (!suppressClick) return;
+    suppressClick = false;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }, true);
 }
 
 async function move(paneIndex, delta) {

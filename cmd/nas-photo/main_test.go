@@ -151,7 +151,7 @@ func TestWebShellDeclaresSVGIcon(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, feature := range []string{`linearGradient id="sky"`, `circle cx="345"`, `clipPath id="frame"`} {
+	for _, feature := range []string{`linearGradient id="sky"`, `circle cx="200"`, `clipPath id="frame"`} {
 		if !strings.Contains(string(icon), feature) {
 			t.Fatalf("SVG icon is missing %q", feature)
 		}
