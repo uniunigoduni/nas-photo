@@ -884,7 +884,7 @@ function bindSwipe(pane, index) {
   const settle = delta => {
     settling = true;
     track.classList.remove('is-dragging');
-    const targetOffset = delta < 0 ? -pane.clientWidth : delta > 0 ? pane.clientWidth : 0;
+    const targetOffset = delta < 0 ? pane.clientWidth : delta > 0 ? -pane.clientWidth : 0;
     let finished = false;
     const finish = () => {
       if (finished) return;
