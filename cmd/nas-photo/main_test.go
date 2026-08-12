@@ -297,6 +297,32 @@ func TestGalleryAutomaticallyLoadsEveryMediaPage(t *testing.T) {
 	}
 }
 
+func TestViewerSwipeFollowsPointerAndSettles(t *testing.T) {
+	content, err := assets.ReadFile("web/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(content)
+	for _, expected := range []string{
+		`class="swipe-track"`,
+		`pane.addEventListener('pointermove'`,
+		`translate3d(calc(-100% + ${offset}px), 0, 0)`,
+		`const fastSwipe =`,
+		`settle(canMove ? direction : 0)`,
+	} {
+		if !strings.Contains(source, expected) {
+			t.Fatalf("viewer swipe is missing %q", expected)
+		}
+	}
+	styles, err := assets.ReadFile("web/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(styles), ".swipe-track.is-settling") {
+		t.Fatal("viewer swipe does not animate to its settled position")
+	}
+}
+
 func TestMakeImageThumbnail(t *testing.T) {
 	dir := t.TempDir()
 	source := filepath.Join(dir, "source.jpg")

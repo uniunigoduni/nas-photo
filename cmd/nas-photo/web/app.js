@@ -740,12 +740,19 @@ function paneHTML(id, index) {
   const media = item.kind === 'video'
     ? `<video class="media" src="${source}" autoplay playsinline controls
         ${state.loop ? 'loop' : ''} ${state.muted ? 'muted' : ''}></video>`
-    : `<img class="media zoomable" src="${source}" alt="${escapeHTML(item.name)}" style="transform:scale(${state.zoom[index]})">`;
+    : `<img class="media zoomable" src="${source}" alt="${escapeHTML(item.name)}" draggable="false" style="transform:scale(${state.zoom[index]})">`;
+  const itemIndex = state.items.findIndex(candidate => candidate.id === id);
+  const previous = itemIndex > 0 ? state.items[itemIndex - 1] : null;
+  const next = itemIndex >= 0 ? state.items[itemIndex + 1] : null;
   const primaryScreen = embeddedRole !== 'secondary';
   const previousAction = primaryScreen ? 'prev1' : 'prev2';
   const nextAction = primaryScreen ? 'next1' : 'next2';
   return `<section class="pane" data-pane="${index}" tabindex="0">
-    ${media}<div class="controls">
+    <div class="swipe-track">
+      <div class="swipe-slide swipe-slide-previous" data-available="${Boolean(previous)}">${swipePreviewHTML(previous)}</div>
+      <div class="swipe-slide swipe-slide-current">${media}</div>
+      <div class="swipe-slide swipe-slide-next" data-available="${Boolean(next)}">${swipePreviewHTML(next)}</div>
+    </div><div class="controls">
       <button class="close-viewer" aria-label="${t('backGallery')}" data-tooltip="${t('backGallery')}" data-shortcut-label="Esc">×</button>
       ${!embeddedMode && index === 0 && innerWidth >= 768 && !state.split ? `<button class="add-pane" aria-label="${t('splitToggle')}" data-tooltip="${t('addSplit')}" data-shortcut-action="splitToggle">＋</button>` : ''}
       <button class="previous" aria-label="${t('previous')}" data-tooltip="${t('previous')}" data-shortcut-action="${previousAction}">←</button>
@@ -758,12 +765,23 @@ function paneHTML(id, index) {
     </div></section>`;
 }
 
+function swipePreviewHTML(item) {
+  if (!item) return '';
+  const source = item.kind === 'video'
+    ? `/api/media/${item.id}/thumbnail${state.thumbnailVersion ? `?v=${state.thumbnailVersion}` : ''}`
+    : `/api/media/${item.id}/content`;
+  return `<span class="swipe-preview-wrap">
+    <img class="swipe-preview" src="${source}" alt="" draggable="false" decoding="async">
+    ${item.kind === 'video' ? '<span class="swipe-preview-play" aria-hidden="true">▶</span>' : ''}
+  </span>`;
+}
+
 function bindPane(pane, preserveControls = false) {
   const index = Number(pane.dataset.pane);
   bindControlVisibility(pane, preserveControls);
   pane.onclick = event => {
     state.activePane = index;
-    if (event.target === pane) {
+    if (event.target === pane || event.target.classList.contains('swipe-slide')) {
       leaveViewer();
     }
   };
@@ -851,29 +869,98 @@ function bindControlVisibility(pane, preserve = false) {
 }
 
 function bindSwipe(pane, index) {
+  const track = $('.swipe-track', pane);
+  const previousAvailable = $('.swipe-slide-previous', pane)?.dataset.available === 'true';
+  const nextAvailable = $('.swipe-slide-next', pane)?.dataset.available === 'true';
   let pointerId = null;
-  let startX = 0, startY = 0, startTime = 0;
+  let startX = 0, startY = 0, startTime = 0, lastX = 0, lastTime = 0, velocityX = 0;
+  let dragging = false;
+  let settling = false;
   let suppressClick = false;
+  const setOffset = (offset, animate = false) => {
+    track.classList.toggle('is-settling', animate);
+    track.style.transform = `translate3d(calc(-100% + ${offset}px), 0, 0)`;
+  };
+  const settle = delta => {
+    settling = true;
+    track.classList.remove('is-dragging');
+    const targetOffset = delta < 0 ? -pane.clientWidth : delta > 0 ? pane.clientWidth : 0;
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      track.removeEventListener('transitionend', onTransitionEnd);
+      settling = false;
+      if (delta) {
+        move(index, delta);
+      } else {
+        track.classList.remove('is-settling');
+      }
+    };
+    const onTransitionEnd = event => {
+      if (event.target === track && event.propertyName === 'transform') finish();
+    };
+    track.addEventListener('transitionend', onTransitionEnd);
+    setOffset(targetOffset, true);
+    setTimeout(finish, 360);
+  };
   pane.addEventListener('pointerdown', event => {
-    if (event.button !== 0 || !event.target.closest('.media')) return;
+    const media = event.target.closest('.media');
+    if (settling || event.button !== 0 || !media || !media.closest('.swipe-slide-current')) return;
     const video = event.target.closest('video');
     if (video && event.clientY >= video.getBoundingClientRect().bottom - 64) return;
     pointerId = event.pointerId;
-    startX = event.clientX; startY = event.clientY; startTime = performance.now();
+    startX = lastX = event.clientX;
+    startY = event.clientY;
+    startTime = lastTime = performance.now();
+    velocityX = 0;
+    dragging = false;
+  });
+  pane.addEventListener('pointermove', event => {
+    if (event.pointerId !== pointerId) return;
+    const dx = event.clientX - startX;
+    const dy = event.clientY - startY;
+    if (!dragging) {
+      if (Math.hypot(dx, dy) < 8) return;
+      if (Math.abs(dx) <= Math.abs(dy) * 1.15) {
+        pointerId = null;
+        return;
+      }
+      dragging = true;
+      suppressClick = true;
+      pane.setPointerCapture?.(event.pointerId);
+      track.classList.add('is-dragging');
+    }
+    const now = performance.now();
+    const elapsed = now - lastTime;
+    if (elapsed > 0) velocityX = (event.clientX - lastX) / elapsed;
+    lastX = event.clientX;
+    lastTime = now;
+    const atEdge = (dx > 0 && !previousAvailable) || (dx < 0 && !nextAvailable);
+    setOffset(atEdge ? dx * 0.28 : dx);
+    event.preventDefault();
   });
   pane.addEventListener('pointerup', event => {
     if (event.pointerId !== pointerId) return;
     pointerId = null;
+    if (!dragging) return;
+    dragging = false;
     const dx = event.clientX - startX;
-    const dy = event.clientY - startY;
-    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.3 && performance.now() - startTime < 1000) {
-      suppressClick = true;
-      event.preventDefault();
-      move(index, dx < 0 ? 1 : -1);
-    }
+    const elapsed = performance.now() - startTime;
+    const distanceThreshold = Math.min(pane.clientWidth * 0.22, 140);
+    const fastSwipe = elapsed < 700 && Math.abs(velocityX) >= 0.45 && Math.abs(dx) >= 28;
+    const direction = Math.abs(dx) >= distanceThreshold || fastSwipe ? (dx < 0 ? 1 : -1) : 0;
+    const canMove = direction < 0 ? previousAvailable : direction > 0 ? nextAvailable : false;
+    event.preventDefault();
+    settle(canMove ? direction : 0);
   });
   pane.addEventListener('pointercancel', event => {
-    if (event.pointerId === pointerId) pointerId = null;
+    if (event.pointerId !== pointerId) return;
+    pointerId = null;
+    if (dragging) {
+      dragging = false;
+      settle(0);
+    }
   });
   pane.addEventListener('click', event => {
     if (!suppressClick) return;
