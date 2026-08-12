@@ -776,9 +776,7 @@ function paneHTML(id, index) {
 
 function swipePreviewHTML(item) {
   if (!item) return '';
-  const source = item.kind === 'video'
-    ? `/api/media/${item.id}/thumbnail${state.thumbnailVersion ? `?v=${state.thumbnailVersion}` : ''}`
-    : `/api/media/${item.id}/content`;
+  const source = `/api/media/${item.id}/thumbnail${state.thumbnailVersion ? `?v=${state.thumbnailVersion}` : ''}`;
   return `<span class="swipe-preview-wrap">
     <img class="swipe-preview" src="${source}" alt="" draggable="false" decoding="async">
     ${item.kind === 'video' ? '<span class="swipe-preview-play" aria-hidden="true">▶</span>' : ''}
@@ -789,9 +787,14 @@ function suppressNextViewerClick() {
   state.viewerClickSuppressUntil = performance.now() + 700;
 }
 
+function clearViewerClickSuppression() {
+  state.viewerClickSuppressUntil = 0;
+}
+
 function bindPane(pane, preserveControls = false) {
   const index = Number(pane.dataset.pane);
   bindControlVisibility(pane, preserveControls);
+  pane.addEventListener('pointerdown', clearViewerClickSuppression, true);
   pane.addEventListener('click', event => {
     if (performance.now() >= state.viewerClickSuppressUntil) return;
     state.viewerClickSuppressUntil = 0;

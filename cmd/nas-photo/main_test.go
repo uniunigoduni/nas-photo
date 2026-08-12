@@ -310,6 +310,7 @@ func TestViewerSwipeFollowsPointerAndSettles(t *testing.T) {
 		`const fastSwipe =`,
 		`move(index, direction, displayedOffset + direction * pane.clientWidth)`,
 		`displayedOffset = readOffset()`,
+		`pane.addEventListener('pointerdown', clearViewerClickSuppression, true)`,
 	} {
 		if !strings.Contains(source, expected) {
 			t.Fatalf("viewer swipe is missing %q", expected)
@@ -321,6 +322,15 @@ func TestViewerSwipeFollowsPointerAndSettles(t *testing.T) {
 	}
 	if !strings.Contains(string(styles), ".swipe-track.is-settling") {
 		t.Fatal("viewer swipe does not animate to its settled position")
+	}
+	previewStart := strings.Index(source, "function swipePreviewHTML(")
+	bindPaneStart := strings.Index(source, "function bindPane(")
+	if previewStart < 0 || bindPaneStart <= previewStart {
+		t.Fatal("could not locate viewer swipe preview implementation")
+	}
+	previewSource := source[previewStart:bindPaneStart]
+	if !strings.Contains(previewSource, `/thumbnail`) || strings.Contains(previewSource, `/content`) {
+		t.Fatal("adjacent swipe previews still load full-resolution image content")
 	}
 }
 
