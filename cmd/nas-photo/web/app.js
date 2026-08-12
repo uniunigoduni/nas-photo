@@ -33,7 +33,7 @@ const messages = {
     mediaTip:'Open this media', sortBasis:'Sort by', order:'Order', display:'Layout', size:'Size',
     mediaType:'Media type', index:'Library index', rescanNow:'Scan media folders',
     thumbnails:'Thumbnails', generateThumbnails:'Generate all missing thumbnails',
-    regenerateThumbnails:'Regenerate all thumbnails',
+    regenerateThumbnails:'Regenerate all thumbnails', thumbnailWorking:'Generating thumbnails…',
     leftFrame:'Left NAS-PHOTO screen', rightFrame:'Right NAS-PHOTO screen',
     endSplit:'End split view', selectRightMedia:'Select media for this screen', mediaError:'Could not load this media.',
     backGallery:'Back to gallery', addSplit:'Add an independent screen on the right',
@@ -82,7 +82,7 @@ const messages = {
     mediaTip:'このメディアを表示', sortBasis:'基準', order:'順序', display:'表示方法', size:'大きさ',
     mediaType:'表示する種類', index:'索引', rescanNow:'メディアフォルダをスキャン',
     thumbnails:'サムネイル', generateThumbnails:'未作成のサムネイルを一括生成',
-    regenerateThumbnails:'サムネイルをすべて再生成',
+    regenerateThumbnails:'サムネイルをすべて再生成', thumbnailWorking:'サムネイルを生成しています…',
     leftFrame:'左側のNAS-PHOTO画面', rightFrame:'右側のNAS-PHOTO画面',
     endSplit:'画面分割を解除', selectRightMedia:'右画面のメディアを選択', mediaError:'メディアを読み込めません。',
     backGallery:'一覧へ戻る', addSplit:'独立した画面を右側に追加',
@@ -378,6 +378,7 @@ async function showGallery() {
   state.nextOffset = 0;
   state.pageLoadRequest = null;
   app.innerHTML = `<div class="progress" hidden><i></i></div>
+    <p class="notice job-status" id="job-status" hidden></p>
     <header class="top">
       <strong>NAS-PHOTO</strong>
       <button class="secondary" id="sort-menu" data-tooltip="${t('sortTip')}">${t('sort')}</button>
@@ -587,10 +588,22 @@ function bindGalleryControls() {
       [t('regenerateThumbnails'), 'regenerate-thumbnails']
     ]]
   ], async value => {
-    if (value === 'scan') await api('/api/index/rescan', {method: 'POST'});
-    if (value === 'thumbnails') await api('/api/thumbnails/generate', {method: 'POST'});
-    if (value === 'regenerate-thumbnails') await api('/api/thumbnails/regenerate', {method: 'POST'});
-    monitorScan(state.galleryToken);
+    const status = $('#job-status');
+    try {
+      if (value === 'scan') {
+        await api('/api/index/rescan', {method: 'POST'});
+        monitorScan(state.galleryToken);
+        return;
+      }
+      if (value === 'thumbnails') await api('/api/thumbnails/generate', {method: 'POST'});
+      if (value === 'regenerate-thumbnails') await api('/api/thumbnails/regenerate', {method: 'POST'});
+      status.hidden = false;
+      status.textContent = t('thumbnailWorking');
+      monitorScan(state.galleryToken, false, true);
+    } catch (reason) {
+      status.hidden = false;
+      status.textContent = reason.message;
+    }
   });
   $('#settings').onclick = showSettingsHome;
 }
@@ -635,10 +648,31 @@ async function monitorScan(token, observedRunning = false, observedThumbnailing 
     } else if (observedThumbnailing) {
       state.thumbnailVersion = Date.now();
       renderTiles(false);
+      showThumbnailResult(progress);
     }
   } catch {
     state.pollTimer = setTimeout(() => monitorScan(token, observedRunning, observedThumbnailing), 2000);
   }
+}
+
+function showThumbnailResult(progress) {
+  const status = $('#job-status');
+  if (!status) return;
+  const done = Number(progress.thumbnailDone) || 0;
+  const total = Number(progress.thumbnailTotal) || 0;
+  const errors = Number(progress.thumbnailErrors) || 0;
+  const succeeded = Math.max(0, done - errors);
+  const detail = (progress.thumbnailErrorDetails || [])[0];
+  status.hidden = false;
+  if (errors) {
+    status.textContent = state.language === 'ja'
+      ? `${total}件中${succeeded}件を生成、${errors}件失敗しました。${detail ? ` ${detail}` : ''}`
+      : `Generated ${succeeded} of ${total} thumbnails; ${errors} failed.${detail ? ` ${detail}` : ''}`;
+    return;
+  }
+  status.textContent = state.language === 'ja'
+    ? (total ? `${total}件のサムネイルを生成しました。` : '生成が必要なサムネイルはありません。')
+    : (total ? `Generated ${total} thumbnails.` : 'No thumbnails needed to be generated.');
 }
 
 function findItem(id) {

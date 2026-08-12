@@ -66,6 +66,7 @@ label { display: grid; gap: .4rem; color: #dbe5f6; }
 .language-picker button { min-height: 38px; padding: .45rem .75rem; }
 .error { color: #ffabb4; white-space: pre-wrap; }
 .notice { padding: .75rem; border-radius: 10px; background: #18385b; color: #d8ecff; }
+.job-status { margin: .75rem clamp(12px, 3vw, 28px) 0; }
 .top {
   position: sticky;
   top: 0;

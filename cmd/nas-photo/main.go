@@ -81,6 +81,7 @@ type app struct {
 	thumbDone           int
 	thumbTotal          int
 	thumbErrors         int
+	thumbErrorDetails   []string
 	sessions            map[string]time.Time
 	sessionMu           sync.Mutex
 	cacheDir            string
@@ -748,7 +749,11 @@ func mediaDimensions(path, mediaKind string) (int, int) {
 }
 
 func videoDimensions(ctx context.Context, path string) (int, int) {
-	out, err := exec.CommandContext(ctx, "ffprobe",
+	ffprobePath, err := findMediaTool("ffprobe")
+	if err != nil {
+		return 0, 0
+	}
+	out, err := exec.CommandContext(ctx, ffprobePath,
 		"-v", "error", "-select_streams", "v:0",
 		"-show_entries", "stream=width,height",
 		"-of", "json", path).Output()
@@ -790,6 +795,7 @@ func (a *app) index(w http.ResponseWriter, r *http.Request) {
 		"errors":       append([]string(nil), a.scanErrors...),
 		"thumbnailing": a.thumbnailing, "thumbnailDone": a.thumbDone,
 		"thumbnailTotal": a.thumbTotal, "thumbnailErrors": a.thumbErrors,
+		"thumbnailErrorDetails": append([]string(nil), a.thumbErrorDetails...),
 		"percent": func() int {
 			if a.scanTotal == 0 {
 				if a.scanning {
@@ -995,6 +1001,7 @@ func (a *app) startThumbnailGeneration(w http.ResponseWriter, r *http.Request, r
 	a.thumbDone = 0
 	a.thumbTotal = 0
 	a.thumbErrors = 0
+	a.thumbErrorDetails = nil
 	a.scanMu.Unlock()
 	go a.generateThumbnails(regenerate)
 	jsonOut(w, map[string]bool{"ok": true})
@@ -1013,7 +1020,9 @@ func (a *app) generateThumbnails(regenerate bool) {
 	items := append([]Item(nil), a.items...)
 	a.thumbDone = 0
 	a.thumbErrors = 0
+	a.thumbErrorDetails = nil
 	a.scanMu.Unlock()
+	ffmpegPath, ffmpegErr := findMediaTool("ffmpeg")
 	targets := items
 	if !regenerate {
 		targets = make([]Item, 0, len(items))
@@ -1033,13 +1042,16 @@ func (a *app) generateThumbnails(regenerate bool) {
 		_, statErr := os.Stat(target)
 		var err error
 		if regenerate || errors.Is(statErr, os.ErrNotExist) {
-			err = a.generateThumbnailFile(item, target, regenerate)
+			err = a.generateThumbnailFile(item, target, regenerate, ffmpegPath, ffmpegErr)
 		}
 		a.thumbMu.Unlock()
 		a.scanMu.Lock()
 		a.thumbDone++
 		if err != nil {
 			a.thumbErrors++
+			if len(a.thumbErrorDetails) < 5 {
+				a.thumbErrorDetails = append(a.thumbErrorDetails, fmt.Sprintf("%s: %v", item.Name, err))
+			}
 			a.log.Warn("bulk thumbnail generation failed", "path", item.Path, "error", err)
 		}
 		a.scanMu.Unlock()
@@ -1049,7 +1061,7 @@ func (a *app) generateThumbnails(regenerate bool) {
 	a.scanMu.Unlock()
 }
 
-func (a *app) generateThumbnailFile(item Item, target string, replace bool) error {
+func (a *app) generateThumbnailFile(item Item, target string, replace bool, ffmpegPath string, ffmpegErr error) error {
 	output := target
 	if replace {
 		temp, err := os.CreateTemp(a.cacheDir, ".thumbnail-*.jpg")
@@ -1065,8 +1077,11 @@ func (a *app) generateThumbnailFile(item Item, target string, replace bool) erro
 	}
 	var err error
 	if item.Kind == "video" {
+		if ffmpegErr != nil {
+			return ffmpegErr
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-		err = makeVideoThumbnail(ctx, item.Path, output)
+		err = makeVideoThumbnailWithTool(ctx, ffmpegPath, item.Path, output)
 		cancel()
 	} else {
 		err = makeImageThumbnail(item.Path, output)
@@ -1125,12 +1140,62 @@ func makeImageThumbnail(source, target string) error {
 }
 
 func makeVideoThumbnail(ctx context.Context, source, target string) error {
-	tmp := target + ".tmp.jpg"
-	cmd := exec.CommandContext(ctx, "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-ss", "1", "-i", source, "-frames:v", "1", "-vf", "scale=480:480:force_original_aspect_ratio=decrease", "-q:v", "4", "-y", tmp)
-	if err := cmd.Run(); err != nil {
+	ffmpegPath, err := findMediaTool("ffmpeg")
+	if err != nil {
 		return err
 	}
+	return makeVideoThumbnailWithTool(ctx, ffmpegPath, source, target)
+}
+
+func makeVideoThumbnailWithTool(ctx context.Context, ffmpegPath, source, target string) error {
+	tmp := target + ".tmp.jpg"
+	defer os.Remove(tmp)
+	cmd := exec.CommandContext(ctx, ffmpegPath, "-nostdin", "-hide_banner", "-loglevel", "error", "-ss", "1", "-i", source, "-frames:v", "1", "-vf", "scale=480:480:force_original_aspect_ratio=decrease", "-q:v", "4", "-y", tmp)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		detail := strings.TrimSpace(string(output))
+		if detail != "" {
+			return fmt.Errorf("ffmpeg failed: %w: %s", err, detail)
+		}
+		return fmt.Errorf("ffmpeg failed: %w", err)
+	}
 	return os.Rename(tmp, target)
+}
+
+func findMediaTool(name string) (string, error) {
+	executable := name
+	if runtime.GOOS == "windows" {
+		executable += ".exe"
+	}
+	envName := "NAS_PHOTO_" + strings.ToUpper(name)
+	if configured := strings.TrimSpace(os.Getenv(envName)); configured != "" {
+		if info, err := os.Stat(configured); err == nil && !info.IsDir() {
+			return configured, nil
+		}
+		return "", fmt.Errorf("%s points to an unavailable file: %s", envName, configured)
+	}
+	if appPath, err := os.Executable(); err == nil {
+		candidate := filepath.Join(filepath.Dir(appPath), executable)
+		if info, statErr := os.Stat(candidate); statErr == nil && !info.IsDir() {
+			return candidate, nil
+		}
+	}
+	if path, err := exec.LookPath(executable); err == nil {
+		return path, nil
+	}
+	if runtime.GOOS == "windows" {
+		if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
+			candidates := []string{filepath.Join(localAppData, "Microsoft", "WinGet", "Links", executable)}
+			matches, _ := filepath.Glob(filepath.Join(localAppData, "Microsoft", "WinGet", "Packages", "Gyan.FFmpeg_*", "ffmpeg-*", "bin", executable))
+			candidates = append(candidates, matches...)
+			for _, candidate := range candidates {
+				if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+					return candidate, nil
+				}
+			}
+		}
+	}
+	return "", fmt.Errorf("%s was not found; install FFmpeg, place %s next to NAS-PHOTO, or set %s", executable, executable, envName)
 }
 func (a *app) neighbors(w http.ResponseWriter, r *http.Request, current string) {
 	a.scanMu.Lock()

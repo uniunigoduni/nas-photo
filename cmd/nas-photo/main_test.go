@@ -4,6 +4,7 @@ import (
 	"image"
 	"image/color"
 	"image/jpeg"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -130,6 +131,43 @@ func TestThumbnailRegenerationReplacesCachedFile(t *testing.T) {
 	if a.thumbnailing || a.thumbDone != 1 || a.thumbTotal != 1 || a.thumbErrors != 0 {
 		t.Fatalf("unexpected regeneration progress: running=%v done=%d total=%d errors=%d",
 			a.thumbnailing, a.thumbDone, a.thumbTotal, a.thumbErrors)
+	}
+}
+
+func TestMissingFFmpegIsReportedByBulkThumbnailGeneration(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("NAS_PHOTO_FFMPEG", filepath.Join(dir, "missing-ffmpeg"))
+	item := Item{
+		ID: "video", Path: filepath.Join(dir, "source.mp4"), Name: "source.mp4",
+		Kind: "video", Size: 1, Modified: time.Now(),
+	}
+	a := &app{cacheDir: filepath.Join(dir, "cache"), items: []Item{item}, log: slog.Default()}
+	if err := os.MkdirAll(a.cacheDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	a.generateMissingThumbnails()
+	if a.thumbDone != 1 || a.thumbTotal != 1 || a.thumbErrors != 1 {
+		t.Fatalf("missing FFmpeg was not counted: done=%d total=%d errors=%d", a.thumbDone, a.thumbTotal, a.thumbErrors)
+	}
+	if len(a.thumbErrorDetails) != 1 || !strings.Contains(a.thumbErrorDetails[0], "NAS_PHOTO_FFMPEG") {
+		t.Fatalf("missing FFmpeg reason was not retained: %#v", a.thumbErrorDetails)
+	}
+}
+
+func TestThumbnailFailuresAreShownInGallery(t *testing.T) {
+	sourceBytes, err := assets.ReadFile("web/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(sourceBytes)
+	for _, feature := range []string{
+		"monitorScan(state.galleryToken, false, true)",
+		"progress.thumbnailErrorDetails",
+		"function showThumbnailResult(progress)",
+	} {
+		if !strings.Contains(source, feature) {
+			t.Fatalf("thumbnail result feedback is missing %q", feature)
+		}
 	}
 }
 
