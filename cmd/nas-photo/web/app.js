@@ -744,12 +744,18 @@ function paneHTML(id, index) {
   const item = findItem(id);
   if (!item) return `<section class="pane" data-pane="${index}"><p class="error">${t('mediaError')}</p></section>`;
   const source = `/api/media/${item.id}/content`;
+  const thumbnail = mediaThumbnailURL(item);
   const zoom = state.zoom[index] || {scale:1, x:0, y:0};
+  const transform = `translate3d(${zoom.x}px, ${zoom.y}px, 0) scale(${zoom.scale})`;
   const media = item.kind === 'video'
     ? `<video class="media" src="${source}" autoplay playsinline controls
         ${state.loop ? 'loop' : ''} ${state.muted ? 'muted' : ''}></video>`
-    : `<img class="media zoomable" src="${source}" alt="${escapeHTML(item.name)}" draggable="false"
-        style="transform:translate3d(${zoom.x}px, ${zoom.y}px, 0) scale(${zoom.scale})">`;
+    : `<span class="viewer-image-stage">
+        <img class="media viewer-image-placeholder" src="${thumbnail}" alt="" draggable="false"
+          style="transform:${transform}">
+        <img class="media zoomable viewer-image-full" src="${source}" alt="${escapeHTML(item.name)}" draggable="false"
+          decoding="async" style="transform:${transform}">
+      </span>`;
   const itemIndex = state.items.findIndex(candidate => candidate.id === id);
   const previous = itemIndex > 0 ? state.items[itemIndex - 1] : null;
   const next = itemIndex >= 0 ? state.items[itemIndex + 1] : null;
@@ -774,9 +780,13 @@ function paneHTML(id, index) {
     </div></section>`;
 }
 
+function mediaThumbnailURL(item) {
+  return `/api/media/${item.id}/thumbnail${state.thumbnailVersion ? `?v=${state.thumbnailVersion}` : ''}`;
+}
+
 function swipePreviewHTML(item) {
   if (!item) return '';
-  const source = `/api/media/${item.id}/thumbnail${state.thumbnailVersion ? `?v=${state.thumbnailVersion}` : ''}`;
+  const source = mediaThumbnailURL(item);
   return `<span class="swipe-preview-wrap">
     <img class="swipe-preview" src="${source}" alt="" draggable="false" decoding="async">
     ${item.kind === 'video' ? '<span class="swipe-preview-play" aria-hidden="true">▶</span>' : ''}
@@ -803,7 +813,8 @@ function bindPane(pane, preserveControls = false) {
   }, true);
   pane.onclick = event => {
     state.activePane = index;
-    if (event.target === pane || event.target.classList.contains('swipe-slide')) {
+    if (event.target === pane || event.target.classList.contains('swipe-slide') ||
+        event.target.classList.contains('viewer-image-stage')) {
       leaveViewer();
     }
   };
@@ -878,9 +889,14 @@ function bindControlVisibility(pane, preserve = false) {
 }
 
 function imageZoomBounds(pane, image, scale) {
+  const naturalWidth = image.naturalWidth || pane.clientWidth;
+  const naturalHeight = image.naturalHeight || pane.clientHeight;
+  const fit = Math.min(pane.clientWidth / naturalWidth, pane.clientHeight / naturalHeight);
+  const renderedWidth = naturalWidth * fit;
+  const renderedHeight = naturalHeight * fit;
   return {
-    x: Math.max(0, (image.clientWidth * scale - pane.clientWidth) / 2),
-    y: Math.max(0, (image.clientHeight * scale - pane.clientHeight) / 2)
+    x: Math.max(0, (renderedWidth * scale - pane.clientWidth) / 2),
+    y: Math.max(0, (renderedHeight * scale - pane.clientHeight) / 2)
   };
 }
 
@@ -907,7 +923,26 @@ function clampImageZoom(pane, image, zoom) {
 function applyImageZoom(image, zoom, animate = false) {
   image.classList.toggle('is-zoomed', zoom.scale > 1.001);
   image.classList.toggle('is-zoom-settling', animate);
-  image.style.transform = `translate3d(${zoom.x}px, ${zoom.y}px, 0) scale(${zoom.scale})`;
+  const transform = `translate3d(${zoom.x}px, ${zoom.y}px, 0) scale(${zoom.scale})`;
+  image.style.transform = transform;
+  const placeholder = $('.viewer-image-placeholder', image.closest('.viewer-image-stage'));
+  if (placeholder) placeholder.style.transform = transform;
+}
+
+function revealFullViewerImage(image) {
+  const stage = image.closest('.viewer-image-stage');
+  if (!stage || stage.classList.contains('is-loaded')) return;
+  const reveal = () => {
+    if (!image.isConnected || !image.naturalWidth) return;
+    stage.classList.add('is-loaded');
+    const placeholder = $('.viewer-image-placeholder', stage);
+    if (placeholder) setTimeout(() => placeholder.remove(), 220);
+  };
+  if (image.complete && image.naturalWidth) {
+    image.decode?.().then(reveal, reveal);
+  } else {
+    image.addEventListener('load', () => image.decode?.().then(reveal, reveal) ?? reveal(), {once:true});
+  }
 }
 
 function settleImageZoom(pane, image, index, animate = true) {
@@ -1041,6 +1076,7 @@ function bindSwipe(pane, index) {
   if (image) {
     state.zoom[index] = clampImageZoom(pane, image, state.zoom[index]);
     applyImageZoom(image, state.zoom[index]);
+    revealFullViewerImage(image);
     image.addEventListener('load', () => settleImageZoom(pane, image, index, false), {once:true});
     image.addEventListener('dblclick', event => {
       event.preventDefault();

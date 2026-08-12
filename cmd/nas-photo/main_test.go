@@ -329,8 +329,22 @@ func TestViewerSwipeFollowsPointerAndSettles(t *testing.T) {
 		t.Fatal("could not locate viewer swipe preview implementation")
 	}
 	previewSource := source[previewStart:bindPaneStart]
-	if !strings.Contains(previewSource, `/thumbnail`) || strings.Contains(previewSource, `/content`) {
+	if !strings.Contains(source, "return `/api/media/${item.id}/thumbnail") ||
+		!strings.Contains(previewSource, `const source = mediaThumbnailURL(item)`) ||
+		strings.Contains(previewSource, `/content`) {
 		t.Fatal("adjacent swipe previews still load full-resolution image content")
+	}
+	styleSource := string(styles)
+	previewStyleStart := strings.Index(styleSource, ".swipe-preview {")
+	previewPlayStart := strings.Index(styleSource, ".swipe-preview-play {")
+	if previewStyleStart < 0 || previewPlayStart <= previewStyleStart {
+		t.Fatal("could not locate adjacent swipe preview sizing")
+	}
+	previewStyle := styleSource[previewStyleStart:previewPlayStart]
+	if !strings.Contains(previewStyle, "width: 100%") ||
+		!strings.Contains(previewStyle, "height: 100%") ||
+		!strings.Contains(previewStyle, "object-fit: contain") {
+		t.Fatal("adjacent swipe preview does not fill the viewer with contain sizing")
 	}
 }
 
@@ -365,6 +379,50 @@ func TestViewerZoomUsesGestureLocationAndSupportsPanning(t *testing.T) {
 	if !strings.Contains(styleSource, ".zoomable.is-zoomed") ||
 		!strings.Contains(styleSource, "touch-action: none") {
 		t.Fatal("viewer zoom does not expose draggable image styling or reserve touch gestures")
+	}
+}
+
+func TestViewerKeepsThumbnailUntilFullImageIsDecoded(t *testing.T) {
+	content, err := assets.ReadFile("web/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(content)
+	for _, expected := range []string{
+		`class="viewer-image-stage"`,
+		`class="media viewer-image-placeholder"`,
+		`class="media zoomable viewer-image-full"`,
+		`function revealFullViewerImage(image)`,
+		`image.decode?.().then(reveal, reveal)`,
+		`stage.classList.add('is-loaded')`,
+	} {
+		if !strings.Contains(source, expected) {
+			t.Fatalf("viewer image transition is missing %q", expected)
+		}
+	}
+	styles, err := assets.ReadFile("web/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	styleSource := string(styles)
+	if !strings.Contains(styleSource, ".viewer-image-stage.is-loaded .viewer-image-placeholder") ||
+		!strings.Contains(styleSource, ".viewer-image-stage.is-loaded .viewer-image-full") {
+		t.Fatal("viewer image does not cross-fade from thumbnail to decoded full image")
+	}
+	sharedMediaStart := strings.Index(styleSource, ".viewer-image-stage > .media {")
+	placeholderStart := strings.Index(styleSource, ".viewer-image-placeholder {")
+	if sharedMediaStart < 0 || placeholderStart <= sharedMediaStart {
+		t.Fatal("could not locate shared viewer image sizing")
+	}
+	sharedMediaStyle := styleSource[sharedMediaStart:placeholderStart]
+	if !strings.Contains(sharedMediaStyle, "width: 100%") ||
+		!strings.Contains(sharedMediaStyle, "height: 100%") ||
+		!strings.Contains(sharedMediaStyle, "object-fit: contain") {
+		t.Fatal("thumbnail and full image do not share the same contain area")
+	}
+	if !strings.Contains(source, "const renderedWidth = naturalWidth * fit") ||
+		!strings.Contains(source, "const renderedHeight = naturalHeight * fit") {
+		t.Fatal("zoom bounds do not use the contained image dimensions")
 	}
 }
 
