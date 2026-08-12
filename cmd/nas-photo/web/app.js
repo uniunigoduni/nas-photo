@@ -785,6 +785,10 @@ function swipePreviewHTML(item) {
   </span>`;
 }
 
+function suppressNextViewerClick() {
+  state.viewerClickSuppressUntil = performance.now() + 700;
+}
+
 function bindPane(pane, preserveControls = false) {
   const index = Number(pane.dataset.pane);
   bindControlVisibility(pane, preserveControls);
@@ -980,7 +984,7 @@ function bindSwipe(pane, index) {
       zoom: {...state.zoom[index]}
     };
     mode = 'pinch';
-    state.viewerClickSuppressUntil = performance.now() + 700;
+    suppressNextViewerClick();
     pointers.forEach((_, pointerId) => capturePointer(pointerId));
     image.classList.remove('is-zoom-settling');
   };
@@ -1102,7 +1106,7 @@ function bindSwipe(pane, index) {
         mode = 'ignored';
         return;
       }
-      state.viewerClickSuppressUntil = performance.now() + 700;
+      suppressNextViewerClick();
       capturePointer(event.pointerId);
     }
     if (mode === 'pan' && image && panStart) {
@@ -1132,6 +1136,7 @@ function bindSwipe(pane, index) {
     if (!pointers.has(event.pointerId)) return;
     pointers.delete(event.pointerId);
     if (mode === 'pinch') {
+      suppressNextViewerClick();
       if (pointers.size) {
         continueWithRemainingPointer();
       } else if (image) {
@@ -1145,6 +1150,7 @@ function bindSwipe(pane, index) {
     if (event.pointerId !== primaryPointerId) return;
     primaryPointerId = null;
     if (mode === 'swipe') {
+      suppressNextViewerClick();
       const dx = event.clientX - startX;
       const elapsed = performance.now() - startTime;
       const distanceThreshold = Math.min(pane.clientWidth * .22, 140);
@@ -1159,6 +1165,7 @@ function bindSwipe(pane, index) {
       }
       event.preventDefault();
     } else if (mode === 'pan' && image) {
+      suppressNextViewerClick();
       settleImageZoom(pane, image, index);
       event.preventDefault();
     } else if (mode === 'pending' && image && event.pointerType === 'touch') {
@@ -1168,7 +1175,7 @@ function bindSwipe(pane, index) {
         displayedOffset = 0;
         setOffset(0);
         toggleImageZoomAt(pane, image, index, event.clientX, event.clientY);
-        state.viewerClickSuppressUntil = now + 700;
+        suppressNextViewerClick();
         suppressDblClickUntil = now + 500;
         lastTap = null;
         event.preventDefault();

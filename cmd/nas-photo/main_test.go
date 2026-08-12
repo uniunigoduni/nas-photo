@@ -337,11 +337,15 @@ func TestViewerZoomUsesGestureLocationAndSupportsPanning(t *testing.T) {
 		`mode = 'pinch'`,
 		`mode = 'pan'`,
 		`settleImageZoom(pane, image, index)`,
+		`function suppressNextViewerClick()`,
 		`requestAnimationFrame(constrainVisibleViewerZoom)`,
 	} {
 		if !strings.Contains(source, expected) {
 			t.Fatalf("viewer zoom is missing %q", expected)
 		}
+	}
+	if strings.Count(source, "suppressNextViewerClick();") < 5 {
+		t.Fatal("viewer does not consistently suppress clicks after drag gestures finish")
 	}
 	styles, err := assets.ReadFile("web/style.css")
 	if err != nil {
