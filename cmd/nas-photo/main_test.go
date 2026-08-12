@@ -307,9 +307,9 @@ func TestViewerSwipeFollowsPointerAndSettles(t *testing.T) {
 		`class="swipe-track"`,
 		`pane.addEventListener('pointermove'`,
 		`translate3d(calc(-100% + ${offset}px), 0, 0)`,
-		`delta < 0 ? pane.clientWidth : delta > 0 ? -pane.clientWidth : 0`,
 		`const fastSwipe =`,
-		`settle(canMove ? direction : 0)`,
+		`move(index, direction, displayedOffset + direction * pane.clientWidth)`,
+		`displayedOffset = readOffset()`,
 	} {
 		if !strings.Contains(source, expected) {
 			t.Fatalf("viewer swipe is missing %q", expected)

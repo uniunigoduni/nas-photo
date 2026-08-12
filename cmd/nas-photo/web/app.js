@@ -145,7 +145,9 @@ const state = {
   controlsTimer: null,
   controlsHideAt: 0,
   viewerScrollY: 0,
-  zoom: [1, 1]
+  zoom: [1, 1],
+  swipeOffset: [0, 0],
+  viewerClickSuppressUntil: 0
 };
 document.documentElement.lang = state.language;
 
@@ -639,11 +641,12 @@ function findItem(id) {
   return state.items.find(item => item.id === id);
 }
 
-function openViewer(id, paneIndex = 0) {
+function openViewer(id, paneIndex = 0, swipeOffset = 0) {
   hideTooltip();
   state.viewer[paneIndex] = id;
   state.activePane = paneIndex;
   state.zoom[paneIndex] = 1;
+  state.swipeOffset[paneIndex] = swipeOffset;
   if (embeddedMode && embeddedRole === 'primary') {
     parent.postMessage({type:'primaryMedia', id}, location.origin);
   }
@@ -779,6 +782,12 @@ function swipePreviewHTML(item) {
 function bindPane(pane, preserveControls = false) {
   const index = Number(pane.dataset.pane);
   bindControlVisibility(pane, preserveControls);
+  pane.addEventListener('click', event => {
+    if (performance.now() >= state.viewerClickSuppressUntil) return;
+    state.viewerClickSuppressUntil = 0;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }, true);
   pane.onclick = event => {
     state.activePane = index;
     if (event.target === pane || event.target.classList.contains('swipe-slide')) {
@@ -874,42 +883,47 @@ function bindSwipe(pane, index) {
   const nextAvailable = $('.swipe-slide-next', pane)?.dataset.available === 'true';
   let pointerId = null;
   let startX = 0, startY = 0, startTime = 0, lastX = 0, lastTime = 0, velocityX = 0;
+  let startOffset = 0;
+  let displayedOffset = Number(state.swipeOffset[index]) || 0;
   let dragging = false;
-  let settling = false;
-  let suppressClick = false;
   const setOffset = (offset, animate = false) => {
     track.classList.toggle('is-settling', animate);
     track.style.transform = `translate3d(calc(-100% + ${offset}px), 0, 0)`;
   };
-  const settle = delta => {
-    settling = true;
-    track.classList.remove('is-dragging');
-    const targetOffset = delta < 0 ? pane.clientWidth : delta > 0 ? -pane.clientWidth : 0;
-    let finished = false;
-    const finish = () => {
-      if (finished) return;
-      finished = true;
-      track.removeEventListener('transitionend', onTransitionEnd);
-      settling = false;
-      if (delta) {
-        move(index, delta);
-      } else {
-        track.classList.remove('is-settling');
-      }
-    };
-    const onTransitionEnd = event => {
-      if (event.target === track && event.propertyName === 'transform') finish();
-    };
-    track.addEventListener('transitionend', onTransitionEnd);
-    setOffset(targetOffset, true);
-    setTimeout(finish, 360);
+  const readOffset = () => {
+    const transform = getComputedStyle(track).transform;
+    if (!transform || transform === 'none') return 0;
+    return new DOMMatrixReadOnly(transform).m41 + pane.clientWidth;
   };
+  const settle = () => {
+    track.classList.remove('is-dragging');
+    displayedOffset = 0;
+    setOffset(0, true);
+  };
+  track.addEventListener('transitionend', event => {
+    if (event.target !== track || event.propertyName !== 'transform' || pointerId !== null) return;
+    track.classList.remove('is-settling');
+    displayedOffset = 0;
+  });
+  state.swipeOffset[index] = 0;
+  if (displayedOffset) {
+    setOffset(displayedOffset);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (pointerId === null) settle();
+    }));
+  }
   pane.addEventListener('pointerdown', event => {
-    const media = event.target.closest('.media');
-    if (settling || event.button !== 0 || !media || !media.closest('.swipe-slide-current')) return;
+    const media = event.target.closest('.media, .swipe-preview');
+    const continuingSettle = track.classList.contains('is-settling');
+    if (event.button !== 0 || !media || (!continuingSettle && !media.closest('.swipe-slide-current'))) return;
     const video = event.target.closest('video');
     if (video && event.clientY >= video.getBoundingClientRect().bottom - 64) return;
+    if (continuingSettle) {
+      displayedOffset = readOffset();
+      setOffset(displayedOffset);
+    }
     pointerId = event.pointerId;
+    startOffset = displayedOffset;
     startX = lastX = event.clientX;
     startY = event.clientY;
     startTime = lastTime = performance.now();
@@ -927,7 +941,7 @@ function bindSwipe(pane, index) {
         return;
       }
       dragging = true;
-      suppressClick = true;
+      state.viewerClickSuppressUntil = performance.now() + 700;
       pane.setPointerCapture?.(event.pointerId);
       track.classList.add('is-dragging');
     }
@@ -937,7 +951,8 @@ function bindSwipe(pane, index) {
     lastX = event.clientX;
     lastTime = now;
     const atEdge = (dx > 0 && !previousAvailable) || (dx < 0 && !nextAvailable);
-    setOffset(atEdge ? dx * 0.28 : dx);
+    displayedOffset = startOffset + (atEdge ? dx * 0.28 : dx);
+    setOffset(displayedOffset);
     event.preventDefault();
   });
   pane.addEventListener('pointerup', event => {
@@ -952,25 +967,24 @@ function bindSwipe(pane, index) {
     const direction = Math.abs(dx) >= distanceThreshold || fastSwipe ? (dx < 0 ? 1 : -1) : 0;
     const canMove = direction < 0 ? previousAvailable : direction > 0 ? nextAvailable : false;
     event.preventDefault();
-    settle(canMove ? direction : 0);
+    if (canMove) {
+      track.classList.remove('is-dragging');
+      move(index, direction, displayedOffset + direction * pane.clientWidth);
+    } else {
+      settle();
+    }
   });
   pane.addEventListener('pointercancel', event => {
     if (event.pointerId !== pointerId) return;
     pointerId = null;
     if (dragging) {
       dragging = false;
-      settle(0);
+      settle();
     }
   });
-  pane.addEventListener('click', event => {
-    if (!suppressClick) return;
-    suppressClick = false;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-  }, true);
 }
 
-async function move(paneIndex, delta) {
+async function move(paneIndex, delta, swipeOffset = 0) {
   const current = state.viewer[paneIndex];
   let index = state.items.findIndex(item => item.id === current);
   while (index < 0 && state.nextOffset >= 0) {
@@ -984,7 +998,7 @@ async function move(paneIndex, delta) {
     index = state.items.findIndex(item => item.id === current);
     next = state.items[index + delta];
   }
-  if (next) openViewer(next.id, paneIndex);
+  if (next) openViewer(next.id, paneIndex, swipeOffset);
 }
 
 function showSettingsHome() {
