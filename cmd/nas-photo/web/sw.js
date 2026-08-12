@@ -1,4 +1,4 @@
-const CACHE='nas-photo-shell-v22';
+const CACHE='nas-photo-shell-v23';
 const SHELL=['/','/index.html','/style.css','/layout.js','/app.js','/manifest.webmanifest','/icon.svg'];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(SHELL))));
 self.addEventListener('activate',event=>event.waitUntil(

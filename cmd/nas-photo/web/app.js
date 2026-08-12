@@ -27,7 +27,7 @@ const messages = {
     sortTip:'Change the sort order', viewTip:'Change gallery layout and size', filterTip:'Filter media types',
     rescanTip:'Scan the media library or generate thumbnails', settingsTip:'Open settings', loading:'Loading…',
     noMedia:'No media matches these conditions.',
-    captured:'Date captured', created:'Date created', modified:'Date modified', name:'Name',
+    captured:'Date captured', created:'Date created', modified:'Date modified', name:'Name', random:'Random',
     all:'All', images:'Images & GIFs', videos:'Videos', ascending:'Ascending', descending:'Descending',
     river:'River', square:'Square', small:'Small', medium:'Medium', large:'Large',
     mediaTip:'Open this media', sortBasis:'Sort by', order:'Order', display:'Layout', size:'Size',
@@ -76,7 +76,7 @@ const messages = {
     sortTip:'並び順を変更', viewTip:'一覧の表示方法とサイズを変更', filterTip:'表示するメディアの種類を絞り込み',
     rescanTip:'メディアのスキャンまたはサムネイルの一括生成', settingsTip:'設定を開く', loading:'読み込んでいます…',
     noMedia:'条件に一致するメディアはありません。',
-    captured:'撮影日', created:'作成日', modified:'変更日', name:'名前',
+    captured:'撮影日', created:'作成日', modified:'変更日', name:'名前', random:'ランダム',
     all:'すべて', images:'画像・GIF', videos:'動画', ascending:'昇順', descending:'降順',
     river:'リバー', square:'正方形', small:'小', medium:'中', large:'大',
     mediaTip:'このメディアを表示', sortBasis:'基準', order:'順序', display:'表示方法', size:'大きさ',
@@ -128,6 +128,7 @@ const state = {
   total: 0,
   nextOffset: 0,
   sort: stored.sort || 'modified',
+  randomSeed: stored.randomSeed || createRandomSeed(),
   order: stored.order || 'desc',
   filter: stored.filter || '',
   layout: stored.layout || 'square',
@@ -159,6 +160,12 @@ function t(key) {
   return messages[state.language]?.[key] || messages.en[key] || key;
 }
 
+function createRandomSeed() {
+  const values = new Uint32Array(2);
+  crypto.getRandomValues(values);
+  return `${values[0].toString(36)}-${values[1].toString(36)}`;
+}
+
 function setLanguage(language) {
   state.language = language === 'ja' ? 'ja' : 'en';
   localStorage.setItem('nas-photo-language', state.language);
@@ -167,7 +174,7 @@ function setLanguage(language) {
 
 function savePreferences() {
   localStorage.setItem('nas-photo-preferences', JSON.stringify({
-    sort: state.sort, order: state.order, filter: state.filter,
+    sort: state.sort, randomSeed: state.randomSeed, order: state.order, filter: state.filter,
     layout: state.layout, size: state.size, loop: state.loop, muted: state.muted
   }));
 }
@@ -365,7 +372,7 @@ async function loadSettings() {
 
 function queryString(offset = 0) {
   return new URLSearchParams({
-    sort: state.sort, order: state.order, filter: state.filter,
+    sort: state.sort, order: state.order, seed: state.randomSeed, filter: state.filter,
     offset: String(offset), limit: '200'
   }).toString();
 }
@@ -482,10 +489,10 @@ function renderTiles(append = false) {
       state.galleryObserver.observe(gallery);
     }
   }
-  const sortLabels = {captured: t('captured'), created: t('created'), modified: t('modified'), name: t('name')};
+  const sortLabels = {captured: t('captured'), created: t('created'), modified: t('modified'), name: t('name'), random: t('random')};
   const filterLabels = {'': t('all'), image: t('images'), video: t('videos')};
   $('#selection-summary').textContent =
-    `${sortLabels[state.sort]} · ${state.order === 'asc' ? t('ascending') : t('descending')} / ` +
+    `${sortLabels[state.sort]}${state.sort === 'random' ? '' : ` · ${state.order === 'asc' ? t('ascending') : t('descending')}`} / ` +
     `${state.layout === 'river' ? t('river') : t('square')} · ${{small:t('small'),medium:t('medium'),large:t('large')}[state.size]} / ` +
     `${filterLabels[state.filter]} · ${state.total}`;
 }
@@ -565,10 +572,15 @@ function layoutRiverGallery() {
 
 function bindGalleryControls() {
   $('#sort-menu').onclick = () => optionDialog(t('sort'), [
-    [t('sortBasis'), [[t('captured'), 'captured'], [t('created'), 'created'], [t('modified'), 'modified'], [t('name'), 'name']]],
+    [t('sortBasis'), [[t('captured'), 'captured'], [t('created'), 'created'], [t('modified'), 'modified'], [t('name'), 'name'], [t('random'), 'random']]],
     [t('order'), [[t('ascending'), 'asc'], [t('descending'), 'desc']]]
   ], value => {
-    if (value === 'asc' || value === 'desc') state.order = value; else state.sort = value;
+    if (value === 'asc' || value === 'desc') {
+      state.order = value;
+    } else {
+      state.sort = value;
+      if (value === 'random') state.randomSeed = createRandomSeed();
+    }
     savePreferences(); showGallery();
   });
   $('#view-menu').onclick = () => optionDialog(t('view'), [

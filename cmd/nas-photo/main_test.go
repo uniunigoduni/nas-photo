@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -40,13 +41,58 @@ func TestSortItemsIsStableAndRespectsOrder(t *testing.T) {
 		{ID: "a", Name: "same.jpg", Modified: now},
 		{ID: "c", Name: "z.jpg", Modified: now.Add(time.Hour)},
 	}
-	sortItems(items, "modified", "asc")
+	sortItems(items, "modified", "asc", "")
 	if items[0].ID != "a" || items[1].ID != "b" || items[2].ID != "c" {
 		t.Fatalf("unexpected ascending order: %#v", items)
 	}
-	sortItems(items, "modified", "desc")
+	sortItems(items, "modified", "desc", "")
 	if items[0].ID != "c" {
 		t.Fatalf("unexpected descending order: %#v", items)
+	}
+}
+
+func TestRandomSortIsStableForSeedAndChangesWithNewSeed(t *testing.T) {
+	items := make([]Item, 20)
+	for i := range items {
+		items[i] = Item{ID: fmt.Sprintf("item-%02d", i)}
+	}
+	first := append([]Item(nil), items...)
+	second := append([]Item(nil), items...)
+	third := append([]Item(nil), items...)
+	sortItems(first, "random", "asc", "seed-one")
+	sortItems(second, "random", "desc", "seed-one")
+	sortItems(third, "random", "asc", "seed-two")
+	for i := range first {
+		if first[i].ID != second[i].ID {
+			t.Fatalf("same random seed produced different order at %d: %s != %s", i, first[i].ID, second[i].ID)
+		}
+	}
+	same := true
+	for i := range first {
+		if first[i].ID != third[i].ID {
+			same = false
+			break
+		}
+	}
+	if same {
+		t.Fatal("different random seeds produced the same order")
+	}
+}
+
+func TestRandomSortMenuUsesOneSeedAcrossPageLoads(t *testing.T) {
+	sourceBytes, err := assets.ReadFile("web/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(sourceBytes)
+	for _, feature := range []string{
+		"[t('random'), 'random']",
+		"seed: state.randomSeed",
+		"if (value === 'random') state.randomSeed = createRandomSeed()",
+	} {
+		if !strings.Contains(source, feature) {
+			t.Fatalf("random sort UI is missing %q", feature)
+		}
 	}
 }
 

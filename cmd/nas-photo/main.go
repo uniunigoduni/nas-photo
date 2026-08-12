@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -840,7 +841,7 @@ func (a *app) media(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, x)
 	}
-	sortItems(out, sortBy, order)
+	sortItems(out, sortBy, order, r.URL.Query().Get("seed"))
 	total := len(out)
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
@@ -864,7 +865,21 @@ func (a *app) media(w http.ResponseWriter, r *http.Request) {
 	jsonOut(w, map[string]any{"items": out[offset:end], "total": total, "nextOffset": next})
 }
 
-func sortItems(items []Item, sortBy, order string) {
+func sortItems(items []Item, sortBy, order, seed string) {
+	if sortBy == "random" {
+		keys := make(map[string][sha256.Size]byte, len(items))
+		for _, item := range items {
+			keys[item.ID] = sha256.Sum256([]byte(seed + "\x00" + item.ID))
+		}
+		sort.SliceStable(items, func(i, j int) bool {
+			left, right := keys[items[i].ID], keys[items[j].ID]
+			if cmp := bytes.Compare(left[:], right[:]); cmp != 0 {
+				return cmp < 0
+			}
+			return items[i].ID < items[j].ID
+		})
+		return
+	}
 	ascending := order == "asc"
 	sort.SliceStable(items, func(i, j int) bool {
 		var cmp int
@@ -1201,7 +1216,7 @@ func (a *app) neighbors(w http.ResponseWriter, r *http.Request, current string) 
 	a.scanMu.Lock()
 	items := append([]Item(nil), a.items...)
 	a.scanMu.Unlock()
-	sortItems(items, r.URL.Query().Get("sort"), r.URL.Query().Get("order"))
+	sortItems(items, r.URL.Query().Get("sort"), r.URL.Query().Get("order"), r.URL.Query().Get("seed"))
 	for i, x := range items {
 		if x.ID == current {
 			v := map[string]any{}
