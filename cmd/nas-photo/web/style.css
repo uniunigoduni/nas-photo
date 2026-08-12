@@ -273,7 +273,7 @@ label { display: grid; gap: .4rem; color: #dbe5f6; }
   place-items: center;
   overflow: hidden;
   outline: none;
-  touch-action: pan-y;
+  touch-action: none;
 }
 .swipe-track {
   position: absolute;
@@ -306,7 +306,16 @@ label { display: grid; gap: .4rem; color: #dbe5f6; }
   min-height: 0;
   object-fit: contain;
   transform-origin: center;
-  transition: transform .18s;
+}
+.zoomable {
+  cursor: zoom-in;
+  user-select: none;
+  will-change: transform;
+}
+.zoomable.is-zoomed { cursor: grab; }
+.zoomable.is-zoomed:active { cursor: grabbing; }
+.zoomable.is-zoom-settling {
+  transition: transform .2s cubic-bezier(.22, .61, .36, 1);
 }
 .swipe-preview-wrap {
   position: relative;
@@ -423,7 +432,6 @@ kbd { padding: .25rem .5rem; border: 1px solid #5b6b88; border-radius: 6px; back
   .gallery.river.size-small { --river-target-height: 100px; }
   .gallery.river.size-large { --river-target-height: 210px; }
   .add-pane, .previous, .next, .split-divider, .split-window { display: none; }
-  .pane { touch-action: none; }
   /* Keep visible controls above the media while allowing media gestures and
      native video controls through the transparent parts of this layer. */
   .controls { opacity: 1; z-index: 1; }

@@ -116,6 +116,10 @@ const DEFAULT_SHORTCUTS = {
 };
 const CONTROL_HIDE_DELAY = 2500;
 const TOUCH_CONTROL_HIDE_DELAY = 5000;
+const MAX_IMAGE_ZOOM = 5;
+const DOUBLE_TAP_IMAGE_ZOOM = 2.5;
+const DOUBLE_TAP_DELAY = 300;
+const DOUBLE_TAP_DISTANCE = 28;
 
 const stored = JSON.parse(localStorage.getItem('nas-photo-preferences') || '{}');
 const state = {
@@ -145,7 +149,7 @@ const state = {
   controlsTimer: null,
   controlsHideAt: 0,
   viewerScrollY: 0,
-  zoom: [1, 1],
+  zoom: [{scale:1, x:0, y:0}, {scale:1, x:0, y:0}],
   swipeOffset: [0, 0],
   viewerClickSuppressUntil: 0
 };
@@ -645,7 +649,7 @@ function openViewer(id, paneIndex = 0, swipeOffset = 0) {
   hideTooltip();
   state.viewer[paneIndex] = id;
   state.activePane = paneIndex;
-  state.zoom[paneIndex] = 1;
+  state.zoom[paneIndex] = {scale:1, x:0, y:0};
   state.swipeOffset[paneIndex] = swipeOffset;
   if (embeddedMode && embeddedRole === 'primary') {
     parent.postMessage({type:'primaryMedia', id}, location.origin);
@@ -740,10 +744,12 @@ function paneHTML(id, index) {
   const item = findItem(id);
   if (!item) return `<section class="pane" data-pane="${index}"><p class="error">${t('mediaError')}</p></section>`;
   const source = `/api/media/${item.id}/content`;
+  const zoom = state.zoom[index] || {scale:1, x:0, y:0};
   const media = item.kind === 'video'
     ? `<video class="media" src="${source}" autoplay playsinline controls
         ${state.loop ? 'loop' : ''} ${state.muted ? 'muted' : ''}></video>`
-    : `<img class="media zoomable" src="${source}" alt="${escapeHTML(item.name)}" draggable="false" style="transform:scale(${state.zoom[index]})">`;
+    : `<img class="media zoomable" src="${source}" alt="${escapeHTML(item.name)}" draggable="false"
+        style="transform:translate3d(${zoom.x}px, ${zoom.y}px, 0) scale(${zoom.scale})">`;
   const itemIndex = state.items.findIndex(candidate => candidate.id === id);
   const previous = itemIndex > 0 ? state.items[itemIndex - 1] : null;
   const next = itemIndex >= 0 ? state.items[itemIndex + 1] : null;
@@ -807,19 +813,6 @@ function bindPane(pane, preserveControls = false) {
     event.stopPropagation();
     toggleMuted();
   });
-  const image = $('.zoomable', pane);
-  if (image) {
-    image.ondblclick = event => {
-      event.preventDefault();
-      state.zoom[index] = state.zoom[index] >= 4 ? 1 : state.zoom[index] * 2;
-      image.style.transform = `scale(${state.zoom[index]})`;
-    };
-    image.oncontextmenu = event => {
-      event.preventDefault();
-      state.zoom[index] = 1;
-      image.style.transform = 'scale(1)';
-    };
-  }
   bindSwipe(pane, index);
 }
 
@@ -877,15 +870,77 @@ function bindControlVisibility(pane, preserve = false) {
   }
 }
 
+function imageZoomBounds(pane, image, scale) {
+  return {
+    x: Math.max(0, (image.clientWidth * scale - pane.clientWidth) / 2),
+    y: Math.max(0, (image.clientHeight * scale - pane.clientHeight) / 2)
+  };
+}
+
+function clampValue(value, minimum, maximum) {
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+function resistBound(value, limit) {
+  if (value > limit) return limit + (value - limit) * .24;
+  if (value < -limit) return -limit + (value + limit) * .24;
+  return value;
+}
+
+function clampImageZoom(pane, image, zoom) {
+  const scale = clampValue(zoom.scale, 1, MAX_IMAGE_ZOOM);
+  const bounds = imageZoomBounds(pane, image, scale);
+  return {
+    scale,
+    x: clampValue(zoom.x, -bounds.x, bounds.x),
+    y: clampValue(zoom.y, -bounds.y, bounds.y)
+  };
+}
+
+function applyImageZoom(image, zoom, animate = false) {
+  image.classList.toggle('is-zoomed', zoom.scale > 1.001);
+  image.classList.toggle('is-zoom-settling', animate);
+  image.style.transform = `translate3d(${zoom.x}px, ${zoom.y}px, 0) scale(${zoom.scale})`;
+}
+
+function settleImageZoom(pane, image, index, animate = true) {
+  state.zoom[index] = clampImageZoom(pane, image, state.zoom[index]);
+  applyImageZoom(image, state.zoom[index], animate);
+}
+
+function toggleImageZoomAt(pane, image, index, clientX, clientY) {
+  const current = state.zoom[index];
+  if (current.scale > 1.001) {
+    state.zoom[index] = {scale:1, x:0, y:0};
+  } else {
+    const rect = pane.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    const ratio = DOUBLE_TAP_IMAGE_ZOOM / current.scale;
+    state.zoom[index] = clampImageZoom(pane, image, {
+      scale: DOUBLE_TAP_IMAGE_ZOOM,
+      x: clientX - centerX - (clientX - centerX - current.x) * ratio,
+      y: clientY - centerY - (clientY - centerY - current.y) * ratio
+    });
+  }
+  applyImageZoom(image, state.zoom[index], true);
+}
+
 function bindSwipe(pane, index) {
   const track = $('.swipe-track', pane);
+  const image = $('.swipe-slide-current .zoomable', pane);
   const previousAvailable = $('.swipe-slide-previous', pane)?.dataset.available === 'true';
   const nextAvailable = $('.swipe-slide-next', pane)?.dataset.available === 'true';
-  let pointerId = null;
+  const pointers = new Map();
+  let primaryPointerId = null;
+  let mode = 'idle';
   let startX = 0, startY = 0, startTime = 0, lastX = 0, lastTime = 0, velocityX = 0;
   let startOffset = 0;
   let displayedOffset = Number(state.swipeOffset[index]) || 0;
-  let dragging = false;
+  let panStart = null;
+  let pinchStart = null;
+  let lastTap = null;
+  let suppressDblClickUntil = 0;
   const setOffset = (offset, animate = false) => {
     track.classList.toggle('is-settling', animate);
     track.style.transform = `translate3d(calc(-100% + ${offset}px), 0, 0)`;
@@ -893,15 +948,79 @@ function bindSwipe(pane, index) {
   const readOffset = () => {
     const transform = getComputedStyle(track).transform;
     if (!transform || transform === 'none') return 0;
-    return new DOMMatrixReadOnly(transform).m41 + pane.clientWidth;
+    try {
+      return new DOMMatrixReadOnly(transform).m41 + pane.clientWidth;
+    } catch {
+      return displayedOffset;
+    }
   };
-  const settle = () => {
+  const settleTrack = () => {
     track.classList.remove('is-dragging');
     displayedOffset = 0;
     setOffset(0, true);
   };
+  const capturePointer = pointerId => {
+    try { pane.setPointerCapture?.(pointerId); } catch {}
+  };
+  const pointerPair = () => [...pointers.values()].slice(0, 2);
+  const midpoint = pair => ({
+    x: (pair[0].x + pair[1].x) / 2,
+    y: (pair[0].y + pair[1].y) / 2
+  });
+  const distance = pair => Math.hypot(pair[0].x - pair[1].x, pair[0].y - pair[1].y);
+  const beginPinch = () => {
+    const pair = pointerPair();
+    if (!image || pair.length < 2) return;
+    displayedOffset = 0;
+    setOffset(0);
+    const middle = midpoint(pair);
+    pinchStart = {
+      distance: Math.max(1, distance(pair)),
+      midpoint: middle,
+      zoom: {...state.zoom[index]}
+    };
+    mode = 'pinch';
+    state.viewerClickSuppressUntil = performance.now() + 700;
+    pointers.forEach((_, pointerId) => capturePointer(pointerId));
+    image.classList.remove('is-zoom-settling');
+  };
+  const updatePinch = () => {
+    const pair = pointerPair();
+    if (!image || pair.length < 2 || !pinchStart) return;
+    const middle = midpoint(pair);
+    const rawScale = pinchStart.zoom.scale * distance(pair) / pinchStart.distance;
+    const scale = rawScale < 1
+      ? 1 - (1 - rawScale) * .2
+      : rawScale > MAX_IMAGE_ZOOM
+      ? MAX_IMAGE_ZOOM + (rawScale - MAX_IMAGE_ZOOM) * .2
+      : rawScale;
+    const rect = pane.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    const contentX = (pinchStart.midpoint.x - centerX - pinchStart.zoom.x) / pinchStart.zoom.scale;
+    const contentY = (pinchStart.midpoint.y - centerY - pinchStart.zoom.y) / pinchStart.zoom.scale;
+    const bounds = imageZoomBounds(pane, image, scale);
+    state.zoom[index] = {
+      scale,
+      x: resistBound(middle.x - centerX - contentX * scale, bounds.x),
+      y: resistBound(middle.y - centerY - contentY * scale, bounds.y)
+    };
+    applyImageZoom(image, state.zoom[index]);
+  };
+  const continueWithRemainingPointer = () => {
+    const remaining = pointers.entries().next().value;
+    if (!remaining || !image) return;
+    primaryPointerId = remaining[0];
+    startX = lastX = remaining[1].x;
+    startY = remaining[1].y;
+    startTime = lastTime = performance.now();
+    velocityX = 0;
+    panStart = {...state.zoom[index]};
+    mode = 'pan';
+  };
+
   track.addEventListener('transitionend', event => {
-    if (event.target !== track || event.propertyName !== 'transform' || pointerId !== null) return;
+    if (event.target !== track || event.propertyName !== 'transform' || primaryPointerId !== null) return;
     track.classList.remove('is-settling');
     displayedOffset = 0;
   });
@@ -909,9 +1028,28 @@ function bindSwipe(pane, index) {
   if (displayedOffset) {
     setOffset(displayedOffset);
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      if (pointerId === null) settle();
+      if (primaryPointerId === null) settleTrack();
     }));
   }
+  if (image) {
+    state.zoom[index] = clampImageZoom(pane, image, state.zoom[index]);
+    applyImageZoom(image, state.zoom[index]);
+    image.addEventListener('load', () => settleImageZoom(pane, image, index, false), {once:true});
+    image.addEventListener('dblclick', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (performance.now() < suppressDblClickUntil) return;
+      displayedOffset = 0;
+      setOffset(0);
+      toggleImageZoomAt(pane, image, index, event.clientX, event.clientY);
+    });
+    image.addEventListener('contextmenu', event => {
+      event.preventDefault();
+      state.zoom[index] = {scale:1, x:0, y:0};
+      applyImageZoom(image, state.zoom[index], true);
+    });
+  }
+
   pane.addEventListener('pointerdown', event => {
     const media = event.target.closest('.media, .swipe-preview');
     const continuingSettle = track.classList.contains('is-settling');
@@ -922,65 +1060,141 @@ function bindSwipe(pane, index) {
       displayedOffset = readOffset();
       setOffset(displayedOffset);
     }
-    pointerId = event.pointerId;
+    pointers.set(event.pointerId, {x:event.clientX, y:event.clientY, pointerType:event.pointerType});
+    if (image && pointers.size === 2) {
+      beginPinch();
+      event.preventDefault();
+      return;
+    }
+    if (pointers.size > 1) return;
+    primaryPointerId = event.pointerId;
+    mode = 'pending';
     startOffset = displayedOffset;
     startX = lastX = event.clientX;
     startY = event.clientY;
     startTime = lastTime = performance.now();
     velocityX = 0;
-    dragging = false;
+    panStart = image ? {...state.zoom[index]} : null;
   });
+
   pane.addEventListener('pointermove', event => {
-    if (event.pointerId !== pointerId) return;
+    const point = pointers.get(event.pointerId);
+    if (!point) return;
+    point.x = event.clientX;
+    point.y = event.clientY;
+    if (mode === 'pinch') {
+      updatePinch();
+      event.preventDefault();
+      return;
+    }
+    if (event.pointerId !== primaryPointerId || mode === 'ignored') return;
     const dx = event.clientX - startX;
     const dy = event.clientY - startY;
-    if (!dragging) {
+    if (mode === 'pending') {
       if (Math.hypot(dx, dy) < 8) return;
-      if (Math.abs(dx) <= Math.abs(dy) * 1.15) {
-        pointerId = null;
+      if (image && state.zoom[index].scale > 1.001) {
+        mode = 'pan';
+        image.classList.remove('is-zoom-settling');
+      } else if (Math.abs(dx) > Math.abs(dy) * 1.15) {
+        mode = 'swipe';
+        track.classList.add('is-dragging');
+      } else {
+        mode = 'ignored';
         return;
       }
-      dragging = true;
       state.viewerClickSuppressUntil = performance.now() + 700;
-      pane.setPointerCapture?.(event.pointerId);
-      track.classList.add('is-dragging');
+      capturePointer(event.pointerId);
     }
+    if (mode === 'pan' && image && panStart) {
+      const bounds = imageZoomBounds(pane, image, state.zoom[index].scale);
+      state.zoom[index] = {
+        scale: state.zoom[index].scale,
+        x: resistBound(panStart.x + dx, bounds.x),
+        y: resistBound(panStart.y + dy, bounds.y)
+      };
+      applyImageZoom(image, state.zoom[index]);
+      event.preventDefault();
+      return;
+    }
+    if (mode !== 'swipe') return;
     const now = performance.now();
     const elapsed = now - lastTime;
     if (elapsed > 0) velocityX = (event.clientX - lastX) / elapsed;
     lastX = event.clientX;
     lastTime = now;
     const atEdge = (dx > 0 && !previousAvailable) || (dx < 0 && !nextAvailable);
-    displayedOffset = startOffset + (atEdge ? dx * 0.28 : dx);
+    displayedOffset = startOffset + (atEdge ? dx * .28 : dx);
     setOffset(displayedOffset);
     event.preventDefault();
   });
+
   pane.addEventListener('pointerup', event => {
-    if (event.pointerId !== pointerId) return;
-    pointerId = null;
-    if (!dragging) return;
-    dragging = false;
-    const dx = event.clientX - startX;
-    const elapsed = performance.now() - startTime;
-    const distanceThreshold = Math.min(pane.clientWidth * 0.22, 140);
-    const fastSwipe = elapsed < 700 && Math.abs(velocityX) >= 0.45 && Math.abs(dx) >= 28;
-    const direction = Math.abs(dx) >= distanceThreshold || fastSwipe ? (dx < 0 ? 1 : -1) : 0;
-    const canMove = direction < 0 ? previousAvailable : direction > 0 ? nextAvailable : false;
-    event.preventDefault();
-    if (canMove) {
-      track.classList.remove('is-dragging');
-      move(index, direction, displayedOffset + direction * pane.clientWidth);
-    } else {
-      settle();
+    if (!pointers.has(event.pointerId)) return;
+    pointers.delete(event.pointerId);
+    if (mode === 'pinch') {
+      if (pointers.size) {
+        continueWithRemainingPointer();
+      } else if (image) {
+        primaryPointerId = null;
+        settleImageZoom(pane, image, index);
+        mode = 'idle';
+      }
+      event.preventDefault();
+      return;
     }
+    if (event.pointerId !== primaryPointerId) return;
+    primaryPointerId = null;
+    if (mode === 'swipe') {
+      const dx = event.clientX - startX;
+      const elapsed = performance.now() - startTime;
+      const distanceThreshold = Math.min(pane.clientWidth * .22, 140);
+      const fastSwipe = elapsed < 700 && Math.abs(velocityX) >= .45 && Math.abs(dx) >= 28;
+      const direction = Math.abs(dx) >= distanceThreshold || fastSwipe ? (dx < 0 ? 1 : -1) : 0;
+      const canMove = direction < 0 ? previousAvailable : direction > 0 ? nextAvailable : false;
+      if (canMove) {
+        track.classList.remove('is-dragging');
+        move(index, direction, displayedOffset + direction * pane.clientWidth);
+      } else {
+        settleTrack();
+      }
+      event.preventDefault();
+    } else if (mode === 'pan' && image) {
+      settleImageZoom(pane, image, index);
+      event.preventDefault();
+    } else if (mode === 'pending' && image && event.pointerType === 'touch') {
+      const now = performance.now();
+      if (lastTap && now - lastTap.time <= DOUBLE_TAP_DELAY &&
+          Math.hypot(event.clientX - lastTap.x, event.clientY - lastTap.y) <= DOUBLE_TAP_DISTANCE) {
+        displayedOffset = 0;
+        setOffset(0);
+        toggleImageZoomAt(pane, image, index, event.clientX, event.clientY);
+        state.viewerClickSuppressUntil = now + 700;
+        suppressDblClickUntil = now + 500;
+        lastTap = null;
+        event.preventDefault();
+      } else {
+        lastTap = {time:now, x:event.clientX, y:event.clientY};
+      }
+    }
+    mode = 'idle';
   });
+
   pane.addEventListener('pointercancel', event => {
-    if (event.pointerId !== pointerId) return;
-    pointerId = null;
-    if (dragging) {
-      dragging = false;
-      settle();
-    }
+    if (!pointers.has(event.pointerId)) return;
+    pointers.clear();
+    primaryPointerId = null;
+    if (mode === 'swipe') settleTrack();
+    if ((mode === 'pan' || mode === 'pinch') && image) settleImageZoom(pane, image, index);
+    mode = 'idle';
+  });
+}
+
+function constrainVisibleViewerZoom() {
+  $$('.viewer .pane').forEach(pane => {
+    const image = $('.swipe-slide-current .zoomable', pane);
+    if (!image) return;
+    const index = Number(pane.dataset.pane);
+    settleImageZoom(pane, image, index, false);
   });
 }
 
@@ -1341,6 +1555,7 @@ window.addEventListener('resize', () => {
     state.split = false;
     if (state.viewer[0]) renderViewer(); else leaveViewer();
   }
+  requestAnimationFrame(constrainVisibleViewerZoom);
 });
 
 window.addEventListener('storage', event => {

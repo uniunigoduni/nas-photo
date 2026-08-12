@@ -324,6 +324,36 @@ func TestViewerSwipeFollowsPointerAndSettles(t *testing.T) {
 	}
 }
 
+func TestViewerZoomUsesGestureLocationAndSupportsPanning(t *testing.T) {
+	content, err := assets.ReadFile("web/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(content)
+	for _, expected := range []string{
+		`const DOUBLE_TAP_IMAGE_ZOOM = 2.5`,
+		`function toggleImageZoomAt(`,
+		`x: clientX - centerX - (clientX - centerX - current.x) * ratio`,
+		`mode = 'pinch'`,
+		`mode = 'pan'`,
+		`settleImageZoom(pane, image, index)`,
+		`requestAnimationFrame(constrainVisibleViewerZoom)`,
+	} {
+		if !strings.Contains(source, expected) {
+			t.Fatalf("viewer zoom is missing %q", expected)
+		}
+	}
+	styles, err := assets.ReadFile("web/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	styleSource := string(styles)
+	if !strings.Contains(styleSource, ".zoomable.is-zoomed") ||
+		!strings.Contains(styleSource, "touch-action: none") {
+		t.Fatal("viewer zoom does not expose draggable image styling or reserve touch gestures")
+	}
+}
+
 func TestMakeImageThumbnail(t *testing.T) {
 	dir := t.TempDir()
 	source := filepath.Join(dir, "source.jpg")
