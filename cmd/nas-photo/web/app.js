@@ -813,8 +813,10 @@ function bindPane(pane, preserveControls = false) {
   }, true);
   pane.onclick = event => {
     state.activePane = index;
-    if (event.target === pane || event.target.classList.contains('swipe-slide') ||
-        event.target.classList.contains('viewer-image-stage')) {
+    const image = $('.swipe-slide-current .zoomable', pane);
+    const outsideImage = image && event.target.closest('.viewer-image-stage') &&
+      isPointOutsideDisplayedImage(pane, image, state.zoom[index], event.clientX, event.clientY);
+    if (event.target === pane || event.target.classList.contains('swipe-slide') || outsideImage) {
       leaveViewer();
     }
   };
@@ -888,16 +890,32 @@ function bindControlVisibility(pane, preserve = false) {
   }
 }
 
-function imageZoomBounds(pane, image, scale) {
-  const naturalWidth = image.naturalWidth || pane.clientWidth;
-  const naturalHeight = image.naturalHeight || pane.clientHeight;
+function containedImageSize(pane, image) {
+  const placeholder = $('.viewer-image-placeholder', image.closest('.viewer-image-stage'));
+  const measurable = image.naturalWidth ? image : placeholder;
+  const naturalWidth = measurable?.naturalWidth || pane.clientWidth;
+  const naturalHeight = measurable?.naturalHeight || pane.clientHeight;
   const fit = Math.min(pane.clientWidth / naturalWidth, pane.clientHeight / naturalHeight);
-  const renderedWidth = naturalWidth * fit;
-  const renderedHeight = naturalHeight * fit;
+  return {width:naturalWidth * fit, height:naturalHeight * fit};
+}
+
+function imageZoomBounds(pane, image, scale) {
+  const rendered = containedImageSize(pane, image);
   return {
-    x: Math.max(0, (renderedWidth * scale - pane.clientWidth) / 2),
-    y: Math.max(0, (renderedHeight * scale - pane.clientHeight) / 2)
+    x: Math.max(0, (rendered.width * scale - pane.clientWidth) / 2),
+    y: Math.max(0, (rendered.height * scale - pane.clientHeight) / 2)
   };
+}
+
+function isPointOutsideDisplayedImage(pane, image, zoom, clientX, clientY) {
+  const rect = pane.getBoundingClientRect();
+  const rendered = containedImageSize(pane, image);
+  const width = rendered.width * zoom.scale;
+  const height = rendered.height * zoom.scale;
+  const centerX = rect.left + rect.width / 2 + zoom.x;
+  const centerY = rect.top + rect.height / 2 + zoom.y;
+  return clientX < centerX - width / 2 || clientX > centerX + width / 2 ||
+    clientY < centerY - height / 2 || clientY > centerY + height / 2;
 }
 
 function clampValue(value, minimum, maximum) {

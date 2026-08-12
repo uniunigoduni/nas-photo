@@ -311,6 +311,7 @@ func TestViewerSwipeFollowsPointerAndSettles(t *testing.T) {
 		`move(index, direction, displayedOffset + direction * pane.clientWidth)`,
 		`displayedOffset = readOffset()`,
 		`pane.addEventListener('pointerdown', clearViewerClickSuppression, true)`,
+		`isPointOutsideDisplayedImage(pane, image, state.zoom[index], event.clientX, event.clientY)`,
 	} {
 		if !strings.Contains(source, expected) {
 			t.Fatalf("viewer swipe is missing %q", expected)
@@ -420,8 +421,9 @@ func TestViewerKeepsThumbnailUntilFullImageIsDecoded(t *testing.T) {
 		!strings.Contains(sharedMediaStyle, "object-fit: contain") {
 		t.Fatal("thumbnail and full image do not share the same contain area")
 	}
-	if !strings.Contains(source, "const renderedWidth = naturalWidth * fit") ||
-		!strings.Contains(source, "const renderedHeight = naturalHeight * fit") {
+	if !strings.Contains(source, "function containedImageSize(pane, image)") ||
+		!strings.Contains(source, "function isPointOutsideDisplayedImage(") ||
+		!strings.Contains(source, "const width = rendered.width * zoom.scale") {
 		t.Fatal("zoom bounds do not use the contained image dimensions")
 	}
 }
