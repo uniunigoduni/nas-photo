@@ -171,6 +171,8 @@ pnpm-debug.log*
 /.nas-photo/
 /nas-photo-data/
 /nas-photo-cache/
+/nas-photo-upload-temp/
+nas-photo-uploaded/
 /.verify-state/
 /.verify-cache/
 /nas-photo.exe
