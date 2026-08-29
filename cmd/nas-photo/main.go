@@ -119,7 +119,7 @@ func main() {
 			if q, e := filepath.Abs(p); e == nil {
 				a.allowed = append(a.allowed, filepath.Clean(q))
 			}
-		}
+	}
 	}
 	if len(a.allowed) == 0 {
 		a.allowed = defaultAllowedRoots()
@@ -254,6 +254,7 @@ func (a *app) routes(m *http.ServeMux) {
 	m.HandleFunc("/api/settings", a.settings)
 	m.HandleFunc("/api/settings/shortcuts", a.shortcuts)
 	m.HandleFunc("/api/settings/reset", a.reset)
+	a.uploadRoutes(m)
 	sub, _ := fs.Sub(assets, "web")
 	m.Handle("/", http.FileServer(http.FS(sub)))
 }
