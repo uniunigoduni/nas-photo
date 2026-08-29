@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -216,9 +217,8 @@ func (a *app) createUploadBatch(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "unsupported upload file", http.StatusBadRequest)
 			return
 		}
-		sourcePath := cleanUploadSourcePath(file.SourcePath, name)
 		files = append(files, uploadFile{
-			Index: i, Name: name, SourcePath: sourcePath, Size: file.Size,
+			Index: i, Name: name, SourcePath: cleanUploadSourcePath(file.SourcePath, name), Size: file.Size,
 		})
 	}
 
@@ -278,7 +278,7 @@ func (a *app) getUploadBatch(w http.ResponseWriter, batchID string) {
 	defer lock.Unlock()
 	batch, err := loadUploadBatch(batchID)
 	if err != nil {
-		http.NotFound(w, nil)
+		http.Error(w, "upload batch not found", http.StatusNotFound)
 		return
 	}
 	if uploadBatchExpired(batch, time.Now()) {
@@ -384,7 +384,7 @@ func (a *app) commitUploadBatch(w http.ResponseWriter, batchID string) {
 
 	batch, err := loadUploadBatch(batchID)
 	if err != nil {
-		http.NotFound(w, nil)
+		http.Error(w, "upload batch not found", http.StatusNotFound)
 		return
 	}
 	if uploadBatchExpired(batch, time.Now()) {
@@ -513,7 +513,7 @@ func (a *app) deleteUploadBatch(w http.ResponseWriter, batchID string) {
 	defer lock.Unlock()
 	batch, err := loadUploadBatch(batchID)
 	if err != nil {
-		http.NotFound(w, nil)
+		http.Error(w, "upload batch not found", http.StatusNotFound)
 		return
 	}
 	a.removeUploadBatch(batch)
@@ -601,8 +601,9 @@ func cleanUploadSourcePath(value, fallback string) string {
 	if value == "" {
 		value = fallback
 	}
-	if len(value) > uploadMaximumSourceLength {
-		value = value[len(value)-uploadMaximumSourceLength:]
+	runes := []rune(value)
+	if len(runes) > uploadMaximumSourceLength {
+		value = string(runes[len(runes)-uploadMaximumSourceLength:])
 	}
 	return value
 }
@@ -878,21 +879,10 @@ func (a *app) scheduleUploadRescan() {
 	go func() {
 		for {
 			if a.beginScan() {
-				a.runScan(nilSafeContext())
+				a.runScan(context.Background())
 				return
 			}
 			time.Sleep(time.Second)
 		}
 	}()
 }
-
-func nilSafeContext() interface{ Err() error } {
-	return uploadBackgroundContext{}
-}
-
-type uploadBackgroundContext struct{}
-
-func (uploadBackgroundContext) Deadline() (time.Time, bool) { return time.Time{}, false }
-func (uploadBackgroundContext) Done() <-chan struct{}       { return nil }
-func (uploadBackgroundContext) Err() error                  { return nil }
-func (uploadBackgroundContext) Value(any) any               { return nil }
