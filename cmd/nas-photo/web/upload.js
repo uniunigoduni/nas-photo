@@ -7,7 +7,6 @@
   const copy = {
     en: {
       dropTitle: 'Drop files or folders to upload',
-      dropHint: 'Supported photos and videos will be collected recursively.',
       scanning: 'Checking dropped files…',
       preparing: 'Preparing upload…',
       noFiles: 'No supported photos or videos were found.',
@@ -28,7 +27,6 @@
     },
     ja: {
       dropTitle: 'ファイルまたはフォルダをドロップしてアップロード',
-      dropHint: '中にある対応画像・動画を再帰的に抽出します。',
       scanning: 'ドロップした内容を確認しています…',
       preparing: 'アップロードを準備しています…',
       noFiles: '対応している画像・動画が見つかりませんでした。',
@@ -74,14 +72,11 @@
       card.className = 'upload-drop-card';
       const title = document.createElement('strong');
       title.className = 'upload-drop-title';
-      const hint = document.createElement('span');
-      hint.className = 'upload-drop-hint';
-      card.append(title, hint);
+      card.append(title);
       overlay.append(card);
       document.body.append(overlay);
     }
     $('.upload-drop-title', overlay).textContent = msg('dropTitle');
-    $('.upload-drop-hint', overlay).textContent = msg('dropHint');
 
     if (!panel) {
       panel = document.createElement('section');

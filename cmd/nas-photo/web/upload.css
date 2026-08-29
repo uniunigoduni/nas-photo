@@ -35,12 +35,6 @@
   font-size: clamp(1.3rem, 3vw, 2rem);
 }
 
-.upload-drop-hint {
-  max-width: 520px;
-  color: rgba(255, 255, 255, .75);
-  line-height: 1.6;
-}
-
 #upload-status-panel {
   position: fixed;
   right: 18px;
