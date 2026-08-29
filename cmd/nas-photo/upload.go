@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -91,6 +92,7 @@ var (
 	uploadTempRootOnce sync.Once
 	uploadTempRootPath string
 	uploadTempRootErr  error
+	uploadTempRootTest string
 	uploadCleanupOnce  sync.Once
 	uploadBatchLocks   sync.Map
 )
@@ -109,6 +111,9 @@ func (a *app) uploadRoutes(m *http.ServeMux) {
 }
 
 func uploadTempRoot() (string, error) {
+	if uploadTempRootTest != "" {
+		return uploadTempRootTest, os.MkdirAll(uploadTempRootTest, 0700)
+	}
 	uploadTempRootOnce.Do(func() {
 		executable, err := os.Executable()
 		if err != nil {
@@ -209,6 +214,10 @@ func (a *app) createUploadBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	root := a.st.Roots[0]
 	a.st.mu.RUnlock()
+	if !a.uploadRootStillConfigured(root.Path) {
+		http.Error(w, "upload destination is not allowed", http.StatusConflict)
+		return
+	}
 
 	files := make([]uploadFile, 0, len(request.Files))
 	for i, file := range request.Files {
@@ -430,8 +439,8 @@ func (a *app) commitUploadBatch(w http.ResponseWriter, batchID string) {
 		return
 	}
 
-	destinationDir := filepath.Join(batch.RootPath, uploadDestinationDirName, batch.DateFolder)
-	if err := os.MkdirAll(destinationDir, 0755); err != nil {
+	destinationDir, err := uploadDestinationPath(batch.RootPath, batch.DateFolder, true)
+	if err != nil {
 		a.failUploadCommit(batch, err)
 		http.Error(w, "could not create upload destination", http.StatusInternalServerError)
 		return
@@ -451,10 +460,18 @@ func (a *app) commitUploadBatch(w http.ResponseWriter, batchID string) {
 	for i := range batch.Files {
 		file := &batch.Files[i]
 		finalPath := filepath.Join(destinationDir, file.TargetName)
-		if info, err := os.Stat(finalPath); err == nil && info.Size() == file.Size {
-			continue
-		}
 		partPath, _, _ := uploadPartPaths(batch.ID, i)
+		if _, statErr := os.Stat(finalPath); statErr == nil {
+			equal, compareErr := uploadFilesEqual(partPath, finalPath, file.Size)
+			if compareErr != nil {
+				a.failUploadCommit(batch, compareErr)
+				http.Error(w, "could not verify uploaded media", http.StatusInternalServerError)
+				return
+			}
+			if equal {
+				continue
+			}
+		}
 		stagePath := uploadNASStagePath(destinationDir, batch.ID, i)
 		_ = os.Remove(stagePath)
 		if err := copyUploadFile(partPath, stagePath, file.Size); err != nil {
@@ -473,13 +490,20 @@ func (a *app) commitUploadBatch(w http.ResponseWriter, batchID string) {
 			continue
 		}
 		finalPath := filepath.Join(destinationDir, batch.Files[i].TargetName)
-		if info, err := os.Stat(finalPath); err == nil {
-			if info.Size() == batch.Files[i].Size {
+		if _, err := os.Stat(finalPath); err == nil {
+			partPath, _, _ := uploadPartPaths(batch.ID, i)
+			equal, compareErr := uploadFilesEqual(partPath, finalPath, batch.Files[i].Size)
+			if compareErr == nil && equal {
 				_ = os.Remove(stagePath)
 				delete(staged, i)
 				continue
 			}
 			removeUploadStages(staged)
+			if compareErr != nil {
+				a.failUploadCommit(batch, compareErr)
+				http.Error(w, "could not verify upload destination", http.StatusInternalServerError)
+				return
+			}
 			err := fmt.Errorf("destination appeared during commit: %s", batch.Files[i].TargetName)
 			a.failUploadCommit(batch, err)
 			http.Error(w, "upload destination changed during commit", http.StatusConflict)
@@ -503,7 +527,6 @@ func (a *app) commitUploadBatch(w http.ResponseWriter, batchID string) {
 	if err := os.RemoveAll(uploadBatchDir(batch.ID)); err != nil {
 		a.log.Warn("could not remove completed upload batch", "batch", batch.ID, "error", err)
 	}
-	uploadBatchLocks.Delete(batch.ID)
 	jsonOut(w, map[string]any{"ok": true, "batch": view})
 }
 
@@ -517,7 +540,6 @@ func (a *app) deleteUploadBatch(w http.ResponseWriter, batchID string) {
 		return
 	}
 	a.removeUploadBatch(batch)
-	uploadBatchLocks.Delete(batchID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -530,9 +552,28 @@ func (a *app) failUploadCommit(batch *uploadBatch, err error) {
 
 func (a *app) uploadRootStillConfigured(path string) bool {
 	a.st.mu.RLock()
-	defer a.st.mu.RUnlock()
+	configured := false
 	for _, root := range a.st.Roots {
 		if root.Path == path {
+			configured = true
+			break
+		}
+	}
+	a.st.mu.RUnlock()
+	if !configured || !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		return false
+	}
+	resolvedPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return false
+	}
+	info, err := os.Stat(resolvedPath)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+	for _, allowed := range a.allowed {
+		resolvedAllowed, err := filepath.EvalSymlinks(allowed)
+		if err == nil && pathWithin(resolvedAllowed, resolvedPath) {
 			return true
 		}
 	}
@@ -556,7 +597,7 @@ func (a *app) findMatchingUploadBatch(rootPath string, files []uploadFile) (*upl
 		lock := uploadBatchLock(entry.Name())
 		lock.Lock()
 		batch, err := loadUploadBatch(entry.Name())
-		match := err == nil && !uploadBatchExpired(batch, time.Now()) && batch.RootPath == rootPath && sameUploadFiles(batch.Files, files)
+		match := err == nil && batch.State != uploadStateCompleted && !uploadBatchExpired(batch, time.Now()) && batch.RootPath == rootPath && sameUploadFiles(batch.Files, files)
 		if match {
 			batch.LastActivityAt = time.Now()
 			batch.Error = ""
@@ -632,6 +673,9 @@ func uploadBatchDir(batchID string) string {
 }
 
 func uploadPartPaths(batchID string, index int) (string, string, error) {
+	if !validUploadBatchID(batchID) || index < 0 || index >= uploadMaximumBatchFiles {
+		return "", "", errors.New("invalid upload part path")
+	}
 	root, err := uploadTempRoot()
 	if err != nil {
 		return "", "", err
@@ -645,6 +689,9 @@ func uploadPartPaths(batchID string, index int) (string, string, error) {
 }
 
 func saveUploadBatch(batch *uploadBatch) error {
+	if err := validateUploadBatch(batch, batch.ID); err != nil {
+		return err
+	}
 	root, err := uploadTempRoot()
 	if err != nil {
 		return err
@@ -684,7 +731,53 @@ func loadUploadBatch(batchID string) (*uploadBatch, error) {
 	if batch.ID != batchID {
 		return nil, errors.New("upload batch id mismatch")
 	}
+	if err := validateUploadBatch(&batch, batchID); err != nil {
+		return nil, err
+	}
 	return &batch, nil
+}
+
+func validateUploadBatch(batch *uploadBatch, expectedID string) error {
+	if batch == nil || !validUploadBatchID(expectedID) || batch.ID != expectedID {
+		return errors.New("invalid upload batch id")
+	}
+	switch batch.State {
+	case uploadStateUploading, uploadStateReady, uploadStateCommitting, uploadStateCommitFailed, uploadStateCompleted:
+	default:
+		return errors.New("invalid upload batch state")
+	}
+	if batch.CreatedAt.IsZero() || batch.LastActivityAt.IsZero() {
+		return errors.New("invalid upload batch timestamps")
+	}
+	if _, err := time.Parse("20060102", batch.DateFolder); err != nil || len(batch.DateFolder) != 8 {
+		return errors.New("invalid upload date folder")
+	}
+	if batch.DateFolder != batch.CreatedAt.Format("20060102") {
+		return errors.New("upload date folder does not match batch creation date")
+	}
+	if !filepath.IsAbs(batch.RootPath) || filepath.Clean(batch.RootPath) != batch.RootPath {
+		return errors.New("invalid upload root path")
+	}
+	if len(batch.Files) == 0 || len(batch.Files) > uploadMaximumBatchFiles {
+		return errors.New("invalid upload file count")
+	}
+	for i := range batch.Files {
+		file := &batch.Files[i]
+		name, err := safeUploadName(file.Name)
+		if err != nil || name != file.Name || kind(file.Name) == "" || file.Size <= 0 || file.Index != i {
+			return errors.New("invalid upload file manifest")
+		}
+		if cleanUploadSourcePath(file.SourcePath, file.Name) != file.SourcePath {
+			return errors.New("invalid upload source path")
+		}
+		if file.TargetName != "" {
+			target, err := safeUploadName(file.TargetName)
+			if err != nil || target != file.TargetName {
+				return errors.New("invalid upload target name")
+			}
+		}
+	}
+	return nil
 }
 
 func uploadBatchResponse(batch *uploadBatch) uploadBatchView {
@@ -724,8 +817,16 @@ func planUploadTargetNames(destinationDir string, batch *uploadBatch) error {
 		file := &batch.Files[i]
 		if file.TargetName != "" {
 			finalPath := filepath.Join(destinationDir, file.TargetName)
-			if info, err := os.Stat(finalPath); err == nil {
-				if info.Size() == file.Size {
+			if _, err := os.Stat(finalPath); err == nil {
+				partPath, _, pathErr := uploadPartPaths(batch.ID, i)
+				if pathErr != nil {
+					return pathErr
+				}
+				equal, compareErr := uploadFilesEqual(partPath, finalPath, file.Size)
+				if compareErr != nil {
+					return compareErr
+				}
+				if equal {
 					reserved[uploadNameKey(file.TargetName)] = true
 					continue
 				}
@@ -811,6 +912,107 @@ func copyUploadFile(source, destination string, expectedSize int64) error {
 	return nil
 }
 
+func uploadFilesEqual(leftPath, rightPath string, expectedSize int64) (bool, error) {
+	left, err := os.Open(leftPath)
+	if err != nil {
+		return false, err
+	}
+	defer left.Close()
+	right, err := os.Open(rightPath)
+	if err != nil {
+		return false, err
+	}
+	defer right.Close()
+	leftInfo, err := left.Stat()
+	if err != nil {
+		return false, err
+	}
+	rightInfo, err := right.Stat()
+	if err != nil {
+		return false, err
+	}
+	if leftInfo.Size() != expectedSize || rightInfo.Size() != expectedSize {
+		return false, nil
+	}
+	leftBuffer := make([]byte, 64*1024)
+	rightBuffer := make([]byte, len(leftBuffer))
+	for {
+		leftN, leftErr := left.Read(leftBuffer)
+		rightN, rightErr := right.Read(rightBuffer)
+		if leftN != rightN || !bytes.Equal(leftBuffer[:leftN], rightBuffer[:rightN]) {
+			return false, nil
+		}
+		if leftErr != nil || rightErr != nil {
+			if errors.Is(leftErr, io.EOF) && errors.Is(rightErr, io.EOF) {
+				return true, nil
+			}
+			if leftErr != nil && !errors.Is(leftErr, io.EOF) {
+				return false, leftErr
+			}
+			if rightErr != nil && !errors.Is(rightErr, io.EOF) {
+				return false, rightErr
+			}
+			return false, nil
+		}
+	}
+}
+
+func uploadDestinationPath(rootPath, dateFolder string, create bool) (string, error) {
+	if !filepath.IsAbs(rootPath) || filepath.Clean(rootPath) != rootPath {
+		return "", errors.New("invalid upload root path")
+	}
+	if _, err := time.Parse("20060102", dateFolder); err != nil || len(dateFolder) != 8 {
+		return "", errors.New("invalid upload date folder")
+	}
+	rootResolved, err := filepath.EvalSymlinks(rootPath)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(rootResolved)
+	if err != nil || !info.IsDir() {
+		return "", errors.New("upload root is not a directory")
+	}
+	base := filepath.Join(rootPath, uploadDestinationDirName)
+	if err := ensureUploadDirectory(base, create); err != nil {
+		return "", err
+	}
+	baseResolved, err := filepath.EvalSymlinks(base)
+	if err != nil || !pathWithin(rootResolved, baseResolved) {
+		return "", errors.New("upload destination escapes configured root")
+	}
+	destination := filepath.Join(base, dateFolder)
+	if err := ensureUploadDirectory(destination, create); err != nil {
+		return "", err
+	}
+	destinationResolved, err := filepath.EvalSymlinks(destination)
+	if err != nil || !pathWithin(rootResolved, destinationResolved) {
+		return "", errors.New("upload destination escapes configured root")
+	}
+	return destination, nil
+}
+
+func ensureUploadDirectory(path string, create bool) error {
+	info, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) && create {
+		if err := os.Mkdir(path, 0755); err != nil && !errors.Is(err, os.ErrExist) {
+			return err
+		}
+		info, err = os.Stat(path)
+	}
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return errors.New("upload destination is not a directory")
+	}
+	return nil
+}
+
+func pathWithin(root, candidate string) bool {
+	rel, err := filepath.Rel(root, candidate)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
+}
+
 func removeUploadStages(staged map[int]string) {
 	for _, path := range staged {
 		_ = os.Remove(path)
@@ -826,7 +1028,10 @@ func (a *app) cleanupUploadNASStages(batch *uploadBatch) {
 	if batch.RootPath == "" || batch.DateFolder == "" || !validUploadBatchID(batch.ID) {
 		return
 	}
-	destinationDir := filepath.Join(batch.RootPath, uploadDestinationDirName, batch.DateFolder)
+	destinationDir, err := uploadDestinationPath(batch.RootPath, batch.DateFolder, false)
+	if err != nil {
+		return
+	}
 	matches, _ := filepath.Glob(filepath.Join(destinationDir, ".nas-photo-"+batch.ID+"-*.nas-photo-part"))
 	for _, match := range matches {
 		_ = os.Remove(match)
@@ -854,14 +1059,12 @@ func (a *app) cleanupExpiredUploads() {
 		if loadErr == nil {
 			if uploadBatchExpired(batch, now) {
 				a.removeUploadBatch(batch)
-				uploadBatchLocks.Delete(batchID)
 			}
 			lock.Unlock()
 			continue
 		}
 		if info, statErr := entry.Info(); statErr == nil && now.Sub(info.ModTime()) >= uploadBatchTTL {
 			_ = os.RemoveAll(filepath.Join(root, batchID))
-			uploadBatchLocks.Delete(batchID)
 		}
 		lock.Unlock()
 	}
@@ -876,12 +1079,31 @@ func (a *app) uploadCleanupLoop() {
 }
 
 func (a *app) scheduleUploadRescan() {
+	a.uploadRescanMu.Lock()
+	a.uploadRescanPending = true
+	if a.uploadRescanRunning {
+		a.uploadRescanMu.Unlock()
+		return
+	}
+	a.uploadRescanRunning = true
+	a.uploadRescanMu.Unlock()
 	go func() {
 		for {
-			if a.beginScan() {
-				a.runScan(context.Background())
+			a.uploadRescanMu.Lock()
+			if !a.uploadRescanPending {
+				a.uploadRescanRunning = false
+				a.uploadRescanMu.Unlock()
 				return
 			}
+			a.uploadRescanPending = false
+			a.uploadRescanMu.Unlock()
+			if a.beginScan() {
+				a.runScan(context.Background())
+				continue
+			}
+			a.uploadRescanMu.Lock()
+			a.uploadRescanPending = true
+			a.uploadRescanMu.Unlock()
 			time.Sleep(time.Second)
 		}
 	}()

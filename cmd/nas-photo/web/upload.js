@@ -54,6 +54,7 @@
   let dragDepth = 0;
   let activeSession = null;
   let activeXHR = null;
+  let dropInProgress = false;
 
   function language() {
     return document.documentElement.lang === 'ja' ? 'ja' : 'en';
@@ -245,9 +246,10 @@
         else counters.skipped++;
       }
     }
+    const compareText = (left, right) => left < right ? -1 : left > right ? 1 : 0;
     output.sort((left, right) =>
-      left.sourcePath.localeCompare(right.sourcePath) ||
-      left.file.name.localeCompare(right.file.name) ||
+      compareText(left.sourcePath, right.sourcePath) ||
+      compareText(left.file.name, right.file.name) ||
       left.file.size - right.file.size
     );
     return {files: output, skipped: counters.skipped};
@@ -437,9 +439,7 @@
     if (panel) panel.hidden = true;
   }
 
-  async function handleDrop(event) {
-    dragDepth = 0;
-    hideOverlay();
+  async function processDrop(event) {
     ensureUI();
     showPanel(msg('scanning'));
     setProgress(0);
@@ -486,6 +486,24 @@
     }
   }
 
+  async function handleDrop(event) {
+    dragDepth = 0;
+    hideOverlay();
+    if (dropInProgress || (activeSession && !activeSession.finished)) return;
+    if (activeSession?.finished) activeSession = null;
+    dropInProgress = true;
+    try {
+      await processDrop(event);
+    } finally {
+      dropInProgress = false;
+    }
+  }
+
+  function resetDragUI() {
+    dragDepth = 0;
+    hideOverlay();
+  }
+
   function hasFiles(event) {
     return [...(event.dataTransfer?.types || [])].includes('Files');
   }
@@ -505,6 +523,10 @@
   });
 
   document.addEventListener('dragleave', event => {
+    if (event.relatedTarget === null) {
+      resetDragUI();
+      return;
+    }
     if (!hasFiles(event)) return;
     dragDepth = Math.max(0, dragDepth - 1);
     if (!dragDepth) hideOverlay();
@@ -515,4 +537,6 @@
     event.preventDefault();
     handleDrop(event);
   });
+  document.addEventListener('dragend', resetDragUI);
+  window.addEventListener('blur', resetDragUI);
 })();

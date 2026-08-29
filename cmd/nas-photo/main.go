@@ -83,6 +83,9 @@ type app struct {
 	thumbTotal          int
 	thumbErrors         int
 	thumbErrorDetails   []string
+	uploadRescanMu      sync.Mutex
+	uploadRescanPending bool
+	uploadRescanRunning bool
 	sessions            map[string]time.Time
 	sessionMu           sync.Mutex
 	cacheDir            string
@@ -119,7 +122,7 @@ func main() {
 			if q, e := filepath.Abs(p); e == nil {
 				a.allowed = append(a.allowed, filepath.Clean(q))
 			}
-	}
+		}
 	}
 	if len(a.allowed) == 0 {
 		a.allowed = defaultAllowedRoots()
