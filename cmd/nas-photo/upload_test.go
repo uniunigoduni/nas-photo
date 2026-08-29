@@ -348,10 +348,15 @@ func TestUploadWebShellLoadsDragAndDropAssets(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := string(script)
-	for _, expected := range []string{"webkitGetAsEntry", "getAsFileSystemHandle", "walkWebkitEntry", "SUPPORTED_EXTENSIONS", "compareText", "dropInProgress"} {
+	for _, expected := range []string{"webkitGetAsEntry", "getAsFileSystemHandle", "walkWebkitEntry", "SUPPORTED_EXTENSIONS", "appendDroppedFile", "!items.length || !output.length", "compareText", "dropInProgress"} {
 		if !strings.Contains(source, expected) {
 			t.Fatalf("drag-and-drop folder support is missing %q", expected)
 		}
+	}
+	collectAt := strings.Index(source, "collectDroppedFiles(event.dataTransfer)")
+	authAt := strings.Index(source, "requestJSON('/api/auth/me')")
+	if collectAt < 0 || authAt < 0 || collectAt > authAt {
+		t.Fatal("drop data is not captured before the first asynchronous authentication request")
 	}
 	serviceWorker, err := assets.ReadFile("web/sw.js")
 	if err != nil {

@@ -162,15 +162,21 @@
     return file && file.size > 0 && SUPPORTED_EXTENSIONS.has(extension(file.name));
   }
 
+  function appendDroppedFile(file, sourcePath, output, counters) {
+    if (!file) return false;
+    counters.seen++;
+    if (isSupported(file)) {
+      output.push({file, sourcePath: sourcePath || file.name});
+      return true;
+    }
+    counters.skipped++;
+    return false;
+  }
+
   async function walkFileSystemHandle(handle, prefix, output, counters) {
     if (handle.kind === 'file') {
       const file = await handle.getFile();
-      counters.seen++;
-      if (isSupported(file)) {
-        output.push({file, sourcePath: prefix ? `${prefix}/${file.name}` : file.name});
-      } else {
-        counters.skipped++;
-      }
+      appendDroppedFile(file, prefix ? `${prefix}/${file.name}` : file.name, output, counters);
       return;
     }
     const current = prefix ? `${prefix}/${handle.name}` : handle.name;
@@ -190,12 +196,7 @@
   async function walkWebkitEntry(entry, prefix, output, counters) {
     if (entry.isFile) {
       const file = await readEntryFile(entry);
-      counters.seen++;
-      if (isSupported(file)) {
-        output.push({file, sourcePath: prefix ? `${prefix}/${file.name}` : file.name});
-      } else {
-        counters.skipped++;
-      }
+      appendDroppedFile(file, prefix ? `${prefix}/${file.name}` : file.name, output, counters);
       return;
     }
     if (!entry.isDirectory) return;
@@ -215,6 +216,15 @@
     if (items.length) {
       for (const item of items) {
         const entry = typeof item.webkitGetAsEntry === 'function' ? item.webkitGetAsEntry() : null;
+        if (entry?.isDirectory) {
+          await walkWebkitEntry(entry, '', output, counters);
+          continue;
+        }
+        const file = item.getAsFile();
+        if (file) {
+          appendDroppedFile(file, file.name, output, counters);
+          continue;
+        }
         if (entry) {
           await walkWebkitEntry(entry, '', output, counters);
           continue;
@@ -228,17 +238,15 @@
             }
           } catch (_) {}
         }
-        const file = item.getAsFile();
-        if (!file) continue;
-        counters.seen++;
-        if (isSupported(file)) output.push({file, sourcePath: file.name});
-        else counters.skipped++;
       }
-    } else {
+    }
+    if (!items.length || !output.length) {
+      if (items.length) {
+        counters.seen = 0;
+        counters.skipped = 0;
+      }
       for (const file of [...(dataTransfer.files || [])]) {
-        counters.seen++;
-        if (isSupported(file)) output.push({file, sourcePath: file.webkitRelativePath || file.name});
-        else counters.skipped++;
+        appendDroppedFile(file, file.webkitRelativePath || file.name, output, counters);
       }
     }
     const compareText = (left, right) => left < right ? -1 : left > right ? 1 : 0;
@@ -435,6 +443,16 @@
   }
 
   async function processDrop(event) {
+    let collected;
+    try {
+      collected = await collectDroppedFiles(event.dataTransfer);
+    } catch (error) {
+      ensureUI();
+      showPanel(msg('error'), error.message);
+      setActions({close: true});
+      return;
+    }
+
     ensureUI();
     showPanel(msg('scanning'));
     setProgress(0);
@@ -443,15 +461,6 @@
       await requestJSON('/api/auth/me');
     } catch (error) {
       showPanel(msg('signIn'), error.message);
-      setActions({close: true});
-      return;
-    }
-
-    let collected;
-    try {
-      collected = await collectDroppedFiles(event.dataTransfer);
-    } catch (error) {
-      showPanel(msg('error'), error.message);
       setActions({close: true});
       return;
     }
