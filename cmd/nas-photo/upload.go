@@ -80,6 +80,12 @@ type uploadBatchView struct {
 	Error          string           `json:"error,omitempty"`
 }
 
+type uploadCommitProgressView struct {
+	Active     bool  `json:"active"`
+	DoneBytes  int64 `json:"doneBytes"`
+	TotalBytes int64 `json:"totalBytes"`
+}
+
 type uploadCreateRequest struct {
 	Files []struct {
 		Name       string `json:"name"`
@@ -89,12 +95,14 @@ type uploadCreateRequest struct {
 }
 
 var (
-	uploadTempRootOnce sync.Once
-	uploadTempRootPath string
-	uploadTempRootErr  error
-	uploadTempRootTest string
-	uploadCleanupOnce  sync.Once
-	uploadBatchLocks   sync.Map
+	uploadTempRootOnce      sync.Once
+	uploadTempRootPath      string
+	uploadTempRootErr       error
+	uploadTempRootTest      string
+	uploadCleanupOnce       sync.Once
+	uploadBatchLocks        sync.Map
+	uploadCommitProgressMu  sync.RWMutex
+	uploadCommitProgressMap = map[string]uploadCommitProgressView{}
 )
 
 func (a *app) uploadRoutes(m *http.ServeMux) {
@@ -163,6 +171,14 @@ func (a *app) uploadBatchByID(w http.ResponseWriter, r *http.Request) {
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
+		return
+	}
+	if len(parts) == 2 && parts[1] == "progress" {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		a.getUploadCommitProgress(w, batchID)
 		return
 	}
 	if len(parts) == 2 && parts[1] == "commit" {
@@ -296,6 +312,45 @@ func (a *app) getUploadBatch(w http.ResponseWriter, batchID string) {
 		return
 	}
 	jsonOut(w, map[string]any{"batch": uploadBatchResponse(batch)})
+}
+
+func uploadTotalBytes(batch *uploadBatch) int64 {
+	var total int64
+	for _, file := range batch.Files {
+		total += file.Size
+	}
+	return total
+}
+
+func setUploadCommitProgress(batchID string, done, total int64, active bool) {
+	if done < 0 {
+		done = 0
+	}
+	if total < 0 {
+		total = 0
+	}
+	if total > 0 && done > total {
+		done = total
+	}
+	uploadCommitProgressMu.Lock()
+	uploadCommitProgressMap[batchID] = uploadCommitProgressView{Active: active, DoneBytes: done, TotalBytes: total}
+	uploadCommitProgressMu.Unlock()
+}
+
+func clearUploadCommitProgress(batchID string) {
+	uploadCommitProgressMu.Lock()
+	delete(uploadCommitProgressMap, batchID)
+	uploadCommitProgressMu.Unlock()
+}
+
+func (a *app) getUploadCommitProgress(w http.ResponseWriter, batchID string) {
+	uploadCommitProgressMu.RLock()
+	progress, ok := uploadCommitProgressMap[batchID]
+	uploadCommitProgressMu.RUnlock()
+	if !ok {
+		progress = uploadCommitProgressView{}
+	}
+	jsonOut(w, map[string]any{"progress": progress})
 }
 
 func (a *app) receiveUploadFile(w http.ResponseWriter, r *http.Request, batchID string, index int) {
@@ -439,6 +494,11 @@ func (a *app) commitUploadBatch(w http.ResponseWriter, batchID string) {
 		return
 	}
 
+	commitTotal := uploadTotalBytes(batch)
+	commitDone := int64(0)
+	setUploadCommitProgress(batch.ID, 0, commitTotal, true)
+	defer clearUploadCommitProgress(batch.ID)
+
 	destinationDir, err := uploadDestinationPath(batch.RootPath, batch.DateFolder, true)
 	if err != nil {
 		a.failUploadCommit(batch, err)
@@ -469,18 +529,25 @@ func (a *app) commitUploadBatch(w http.ResponseWriter, batchID string) {
 				return
 			}
 			if equal {
+				commitDone += file.Size
+				setUploadCommitProgress(batch.ID, commitDone, commitTotal, true)
 				continue
 			}
 		}
 		stagePath := uploadNASStagePath(destinationDir, batch.ID, i)
 		_ = os.Remove(stagePath)
-		if err := copyUploadFile(partPath, stagePath, file.Size); err != nil {
+		baseDone := commitDone
+		if err := copyUploadFile(partPath, stagePath, file.Size, func(fileDone int64) {
+			setUploadCommitProgress(batch.ID, baseDone+fileDone, commitTotal, true)
+		}); err != nil {
 			removeUploadStages(staged)
 			_ = os.Remove(stagePath)
 			a.failUploadCommit(batch, err)
 			http.Error(w, "could not copy upload to media folder", http.StatusInternalServerError)
 			return
 		}
+		commitDone += file.Size
+		setUploadCommitProgress(batch.ID, commitDone, commitTotal, true)
 		staged[i] = stagePath
 	}
 
@@ -521,6 +588,7 @@ func (a *app) commitUploadBatch(w http.ResponseWriter, batchID string) {
 	batch.State = uploadStateCompleted
 	batch.LastActivityAt = time.Now()
 	batch.Error = ""
+	setUploadCommitProgress(batch.ID, commitTotal, commitTotal, true)
 	view := uploadBatchResponse(batch)
 	_ = saveUploadBatch(batch)
 	a.scheduleUploadRescan()
@@ -884,7 +952,24 @@ func uploadNASStagePath(destinationDir, batchID string, index int) string {
 	return filepath.Join(destinationDir, fmt.Sprintf(".nas-photo-%s-%06d.nas-photo-part", batchID, index))
 }
 
-func copyUploadFile(source, destination string, expectedSize int64) error {
+type uploadProgressWriter struct {
+	dst          io.Writer
+	written      int64
+	lastReported int64
+	onProgress   func(int64)
+}
+
+func (w *uploadProgressWriter) Write(p []byte) (int, error) {
+	n, err := w.dst.Write(p)
+	w.written += int64(n)
+	if w.onProgress != nil && (w.written-w.lastReported >= 1<<20 || err != nil) {
+		w.lastReported = w.written
+		w.onProgress(w.written)
+	}
+	return n, err
+}
+
+func copyUploadFile(source, destination string, expectedSize int64, onProgress func(int64)) error {
 	in, err := os.Open(source)
 	if err != nil {
 		return err
@@ -894,7 +979,11 @@ func copyUploadFile(source, destination string, expectedSize int64) error {
 	if err != nil {
 		return err
 	}
-	written, copyErr := io.Copy(out, in)
+	progressOut := &uploadProgressWriter{dst: out, onProgress: onProgress}
+	written, copyErr := io.Copy(progressOut, in)
+	if onProgress != nil {
+		onProgress(written)
+	}
 	syncErr := out.Sync()
 	closeErr := out.Close()
 	if copyErr != nil {
@@ -1021,6 +1110,7 @@ func removeUploadStages(staged map[int]string) {
 
 func (a *app) removeUploadBatch(batch *uploadBatch) {
 	a.cleanupUploadNASStages(batch)
+	clearUploadCommitProgress(batch.ID)
 	_ = os.RemoveAll(uploadBatchDir(batch.ID))
 }
 

@@ -3,6 +3,8 @@
     '.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif',
     '.mp4', '.mov', '.m4v', '.webm', '.mkv', '.avi'
   ]);
+  const UPLOAD_PHASE_WEIGHT = 0.5;
+  const COMMIT_POLL_INTERVAL_MS = 200;
 
   const copy = {
     en: {
@@ -295,6 +297,42 @@
     return batch.files.reduce((sum, file) => sum + file.size, 0);
   }
 
+  function uploadPhaseProgress(done, total) {
+    return total > 0 ? UPLOAD_PHASE_WEIGHT * Math.max(0, Math.min(1, done / total)) : 0;
+  }
+
+  function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  async function commitBatchWithProgress(session) {
+    let settled = false;
+    let result = null;
+    let failure = null;
+    requestJSON(`/api/uploads/batches/${encodeURIComponent(session.batch.id)}/commit`, {method: 'POST'})
+      .then(value => { result = value; }, error => { failure = error; })
+      .finally(() => { settled = true; });
+
+    while (!settled) {
+      await sleep(COMMIT_POLL_INTERVAL_MS);
+      if (settled) break;
+      try {
+        const response = await requestJSON(`/api/uploads/batches/${encodeURIComponent(session.batch.id)}/progress`);
+        const progress = response.progress || {};
+        const total = Number(progress.totalBytes) || 0;
+        const done = Number(progress.doneBytes) || 0;
+        if (total > 0) {
+          const rawRatio = Math.max(0, Math.min(1, done / total));
+          const ratio = progress.active ? Math.min(0.98, rawRatio) : rawRatio;
+          setProgress(UPLOAD_PHASE_WEIGHT + (1 - UPLOAD_PHASE_WEIGHT) * ratio);
+          showPanel(msg('committing'), `${msg('destination', session.batch.destination)} · ${formatBytes(done)} / ${formatBytes(total)}`);
+        }
+      } catch (_) {}
+    }
+    if (failure) throw failure;
+    return result;
+  }
+
   function uploadFile(batchID, index, file, onProgress) {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
@@ -359,6 +397,7 @@
     }
 
     const total = totalBytes(session.batch);
+    setProgress(uploadPhaseProgress(uploadedBytes(session.batch), total));
     for (let index = 0; index < session.descriptors.length; index++) {
       if (session.cancelled) return;
       if (session.batch.files[index]?.uploaded) continue;
@@ -370,10 +409,10 @@
       );
       try {
         const result = await uploadFile(session.batch.id, index, session.descriptors[index].file, loaded => {
-          setProgress(total ? (doneBefore + loaded) / total : 0);
+          setProgress(uploadPhaseProgress(doneBefore + loaded, total));
         });
         session.batch = result.batch;
-        setProgress(total ? uploadedBytes(session.batch) / total : 1);
+        setProgress(uploadPhaseProgress(uploadedBytes(session.batch), total));
       } catch (error) {
         if (session.cancelled || error.aborted) return;
         if (error.status === 404 || error.status === 410) {
@@ -394,11 +433,12 @@
 
     if (session.cancelled) return;
     showPanel(msg('committing'), msg('destination', session.batch.destination));
-    setProgress(1);
+    setProgress(UPLOAD_PHASE_WEIGHT);
     setActions({retry: false, discard: false, close: false});
     try {
-      const result = await requestJSON(`/api/uploads/batches/${encodeURIComponent(session.batch.id)}/commit`, {method: 'POST'});
+      const result = await commitBatchWithProgress(session);
       session.batch = result.batch;
+      setProgress(1);
       session.finished = true;
       session.failed = false;
       showPanel(msg('completed', session.batch.files.length), msg('destination', session.batch.destination));

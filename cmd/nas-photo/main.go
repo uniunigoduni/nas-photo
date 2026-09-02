@@ -69,29 +69,35 @@ type store struct {
 	Settings
 }
 type app struct {
-	st                  *store
-	allowed             []string
-	log                 *slog.Logger
-	scanMu              sync.Mutex
-	items               []Item
-	scanning            bool
-	scanDone, scanTotal int
-	scanPhase           string
-	scanErrors          []string
-	thumbnailing        bool
-	thumbDone           int
-	thumbTotal          int
-	thumbErrors         int
-	thumbErrorDetails   []string
-	uploadRescanMu      sync.Mutex
-	uploadRescanPending bool
-	uploadRescanRunning bool
-	sessions            map[string]time.Time
-	sessionMu           sync.Mutex
-	cacheDir            string
-	catalogFile         string
-	db                  *sql.DB
-	thumbMu             sync.Mutex
+	st                       *store
+	allowed                  []string
+	log                      *slog.Logger
+	scanMu                   sync.Mutex
+	items                    []Item
+	scanning                 bool
+	scanDone, scanTotal      int
+	scanPhase                string
+	scanErrors               []string
+	thumbnailing             bool
+	thumbDone                int
+	thumbTotal               int
+	thumbErrors              int
+	thumbErrorDetails        []string
+	thumbnailCleaning        bool
+	thumbCleanupDone         int
+	thumbCleanupTotal        int
+	thumbCleanupRemoved      int
+	thumbCleanupErrors       int
+	thumbCleanupErrorDetails []string
+	uploadRescanMu           sync.Mutex
+	uploadRescanPending      bool
+	uploadRescanRunning      bool
+	sessions                 map[string]time.Time
+	sessionMu                sync.Mutex
+	cacheDir                 string
+	catalogFile              string
+	db                       *sql.DB
+	thumbMu                  sync.Mutex
 }
 
 func main() {
@@ -254,6 +260,7 @@ func (a *app) routes(m *http.ServeMux) {
 	m.HandleFunc("/api/index/rescan", a.rescanAPI)
 	m.HandleFunc("/api/thumbnails/generate", a.generateThumbnailsAPI)
 	m.HandleFunc("/api/thumbnails/regenerate", a.regenerateThumbnailsAPI)
+	m.HandleFunc("/api/thumbnails/cleanup", a.cleanupThumbnailsAPI)
 	m.HandleFunc("/api/settings", a.settings)
 	m.HandleFunc("/api/settings/shortcuts", a.shortcuts)
 	m.HandleFunc("/api/settings/reset", a.reset)
@@ -801,6 +808,10 @@ func (a *app) index(w http.ResponseWriter, r *http.Request) {
 		"thumbnailing": a.thumbnailing, "thumbnailDone": a.thumbDone,
 		"thumbnailTotal": a.thumbTotal, "thumbnailErrors": a.thumbErrors,
 		"thumbnailErrorDetails": append([]string(nil), a.thumbErrorDetails...),
+		"thumbnailCleaning":     a.thumbnailCleaning, "thumbnailCleanupDone": a.thumbCleanupDone,
+		"thumbnailCleanupTotal": a.thumbCleanupTotal, "thumbnailCleanupRemoved": a.thumbCleanupRemoved,
+		"thumbnailCleanupErrors":       a.thumbCleanupErrors,
+		"thumbnailCleanupErrorDetails": append([]string(nil), a.thumbCleanupErrorDetails...),
 		"percent": func() int {
 			if a.scanTotal == 0 {
 				if a.scanning {
@@ -989,8 +1000,12 @@ func (a *app) thumbnail(w http.ResponseWriter, r *http.Request, it Item) {
 	http.ServeContent(w, r, key, info.ModTime(), f)
 }
 
+func thumbnailKey(it Item) string {
+	return fmt.Sprintf("%s-%d-%d.jpg", it.ID, it.Size, it.Modified.UnixNano())
+}
+
 func (a *app) thumbnailPath(it Item) (string, string) {
-	key := fmt.Sprintf("%s-%d-%d.jpg", it.ID, it.Size, it.Modified.UnixNano())
+	key := thumbnailKey(it)
 	return key, filepath.Join(a.cacheDir, key)
 }
 
@@ -1011,6 +1026,11 @@ func (a *app) startThumbnailGeneration(w http.ResponseWriter, r *http.Request, r
 		return
 	}
 	a.scanMu.Lock()
+	if a.thumbnailCleaning {
+		a.scanMu.Unlock()
+		http.Error(w, "thumbnail cleanup is running", http.StatusConflict)
+		return
+	}
 	if a.thumbnailing {
 		a.scanMu.Unlock()
 		jsonOut(w, map[string]bool{"ok": true, "alreadyRunning": true})
@@ -1024,6 +1044,88 @@ func (a *app) startThumbnailGeneration(w http.ResponseWriter, r *http.Request, r
 	a.scanMu.Unlock()
 	go a.generateThumbnails(regenerate)
 	jsonOut(w, map[string]bool{"ok": true})
+}
+
+func (a *app) cleanupThumbnailsAPI(w http.ResponseWriter, r *http.Request) {
+	if !a.authed(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	a.scanMu.Lock()
+	if a.thumbnailing {
+		a.scanMu.Unlock()
+		http.Error(w, "thumbnail generation is running", http.StatusConflict)
+		return
+	}
+	if a.thumbnailCleaning {
+		a.scanMu.Unlock()
+		jsonOut(w, map[string]bool{"ok": true, "alreadyRunning": true})
+		return
+	}
+	a.thumbnailCleaning = true
+	a.thumbCleanupDone = 0
+	a.thumbCleanupTotal = 0
+	a.thumbCleanupRemoved = 0
+	a.thumbCleanupErrors = 0
+	a.thumbCleanupErrorDetails = nil
+	a.scanMu.Unlock()
+	go a.cleanupThumbnails()
+	jsonOut(w, map[string]bool{"ok": true})
+}
+
+func (a *app) cleanupThumbnails() {
+	a.scanMu.Lock()
+	items := append([]Item(nil), a.items...)
+	a.scanMu.Unlock()
+	valid := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		valid[thumbnailKey(item)] = struct{}{}
+	}
+	entries, err := os.ReadDir(a.cacheDir)
+	if err != nil {
+		a.scanMu.Lock()
+		a.thumbCleanupErrors = 1
+		a.thumbCleanupErrorDetails = []string{err.Error()}
+		a.thumbnailCleaning = false
+		a.scanMu.Unlock()
+		return
+	}
+	candidates := make([]os.DirEntry, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.EqualFold(filepath.Ext(entry.Name()), ".jpg") {
+			candidates = append(candidates, entry)
+		}
+	}
+	a.scanMu.Lock()
+	a.thumbCleanupTotal = len(candidates)
+	a.scanMu.Unlock()
+	a.thumbMu.Lock()
+	defer a.thumbMu.Unlock()
+	for _, entry := range candidates {
+		_, keep := valid[entry.Name()]
+		var removeErr error
+		if !keep {
+			removeErr = os.Remove(filepath.Join(a.cacheDir, entry.Name()))
+		}
+		a.scanMu.Lock()
+		a.thumbCleanupDone++
+		if !keep && removeErr == nil {
+			a.thumbCleanupRemoved++
+		}
+		if removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			a.thumbCleanupErrors++
+			if len(a.thumbCleanupErrorDetails) < 5 {
+				a.thumbCleanupErrorDetails = append(a.thumbCleanupErrorDetails, fmt.Sprintf("%s: %v", entry.Name(), removeErr))
+			}
+		}
+		a.scanMu.Unlock()
+	}
+	a.scanMu.Lock()
+	a.thumbnailCleaning = false
+	a.scanMu.Unlock()
 }
 
 func (a *app) generateMissingThumbnails() {

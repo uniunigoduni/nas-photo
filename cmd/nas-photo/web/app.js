@@ -33,7 +33,8 @@ const messages = {
     mediaTip:'Open this media', sortBasis:'Sort by', order:'Order', display:'Layout', size:'Size',
     mediaType:'Media type', index:'Library index', rescanNow:'Scan media folders',
     thumbnails:'Thumbnails', generateThumbnails:'Generate all missing thumbnails',
-    regenerateThumbnails:'Regenerate all thumbnails', thumbnailWorking:'Generating thumbnails…',
+    regenerateThumbnails:'Regenerate all thumbnails', cleanupThumbnails:'Find and delete unused thumbnails',
+    thumbnailWorking:'Generating thumbnails…', thumbnailCleanupWorking:'Checking thumbnail cache…',
     leftFrame:'Left NAS-PHOTO screen', rightFrame:'Right NAS-PHOTO screen',
     endSplit:'End split view', selectRightMedia:'Select media for this screen', mediaError:'Could not load this media.',
     backGallery:'Back to gallery', addSplit:'Add an independent screen on the right',
@@ -82,7 +83,8 @@ const messages = {
     mediaTip:'このメディアを表示', sortBasis:'基準', order:'順序', display:'表示方法', size:'大きさ',
     mediaType:'表示する種類', index:'索引', rescanNow:'メディアフォルダをスキャン',
     thumbnails:'サムネイル', generateThumbnails:'未作成のサムネイルを一括生成',
-    regenerateThumbnails:'サムネイルをすべて再生成', thumbnailWorking:'サムネイルを生成しています…',
+    regenerateThumbnails:'サムネイルをすべて再生成', cleanupThumbnails:'不要なサムネイルを調査して削除',
+    thumbnailWorking:'サムネイルを生成しています…', thumbnailCleanupWorking:'サムネイルキャッシュを確認しています…',
     leftFrame:'左側のNAS-PHOTO画面', rightFrame:'右側のNAS-PHOTO画面',
     endSplit:'画面分割を解除', selectRightMedia:'右画面のメディアを選択', mediaError:'メディアを読み込めません。',
     backGallery:'一覧へ戻る', addSplit:'独立した画面を右側に追加',
@@ -597,7 +599,8 @@ function bindGalleryControls() {
     [t('index'), [[t('rescanNow'), 'scan']]],
     [t('thumbnails'), [
       [t('generateThumbnails'), 'thumbnails'],
-      [t('regenerateThumbnails'), 'regenerate-thumbnails']
+      [t('regenerateThumbnails'), 'regenerate-thumbnails'],
+      [t('cleanupThumbnails'), 'cleanup-thumbnails']
     ]]
   ], async value => {
     const status = $('#job-status');
@@ -605,6 +608,13 @@ function bindGalleryControls() {
       if (value === 'scan') {
         await api('/api/index/rescan', {method: 'POST'});
         monitorScan(state.galleryToken);
+        return;
+      }
+      if (value === 'cleanup-thumbnails') {
+        await api('/api/thumbnails/cleanup', {method: 'POST'});
+        status.hidden = false;
+        status.textContent = t('thumbnailCleanupWorking');
+        monitorScan(state.galleryToken, false, false, true);
         return;
       }
       if (value === 'thumbnails') await api('/api/thumbnails/generate', {method: 'POST'});
@@ -636,24 +646,28 @@ function optionDialog(title, sections, onSelect) {
   overlay.onclick = event => { if (event.target === overlay) overlay.remove(); };
 }
 
-async function monitorScan(token, observedRunning = false, observedThumbnailing = false) {
+async function monitorScan(token, observedRunning = false, observedThumbnailing = false, observedCleanup = false) {
   clearTimeout(state.pollTimer);
   try {
     const progress = await api('/api/index/current');
     if (token !== state.galleryToken || !$('#gallery')) return;
     const bar = $('.progress');
-    const working = progress.scanning || progress.thumbnailing;
+    const working = progress.scanning || progress.thumbnailing || progress.thumbnailCleaning;
     const thumbnailPercent = progress.thumbnailTotal > 0
       ? Math.round(progress.thumbnailDone * 100 / progress.thumbnailTotal)
       : 0;
+    const cleanupPercent = progress.thumbnailCleanupTotal > 0
+      ? Math.round(progress.thumbnailCleanupDone * 100 / progress.thumbnailCleanupTotal)
+      : 0;
     bar.hidden = !working;
-    bar.classList.toggle('indeterminate', progress.scanning && !progress.total);
-    $('i', bar).style.width = `${progress.thumbnailing ? thumbnailPercent : (progress.percent || 0)}%`;
+    bar.classList.toggle('indeterminate', (progress.scanning && !progress.total) || (progress.thumbnailCleaning && !progress.thumbnailCleanupTotal));
+    $('i', bar).style.width = `${progress.thumbnailCleaning ? cleanupPercent : (progress.thumbnailing ? thumbnailPercent : (progress.percent || 0))}%`;
     if (working) {
       state.pollTimer = setTimeout(() => monitorScan(
         token,
         observedRunning || progress.scanning,
-        observedThumbnailing || progress.thumbnailing
+        observedThumbnailing || progress.thumbnailing,
+        observedCleanup || progress.thumbnailCleaning
       ), 750);
     } else if (observedRunning) {
       if (progress.phase === 'ready') await refreshGalleryItems();
@@ -661,10 +675,31 @@ async function monitorScan(token, observedRunning = false, observedThumbnailing 
       state.thumbnailVersion = Date.now();
       renderTiles(false);
       showThumbnailResult(progress);
+    } else if (observedCleanup) {
+      showThumbnailCleanupResult(progress);
     }
   } catch {
-    state.pollTimer = setTimeout(() => monitorScan(token, observedRunning, observedThumbnailing), 2000);
+    state.pollTimer = setTimeout(() => monitorScan(token, observedRunning, observedThumbnailing, observedCleanup), 2000);
   }
+}
+
+function showThumbnailCleanupResult(progress) {
+  const status = $('#job-status');
+  if (!status) return;
+  const total = Number(progress.thumbnailCleanupTotal) || 0;
+  const removed = Number(progress.thumbnailCleanupRemoved) || 0;
+  const errors = Number(progress.thumbnailCleanupErrors) || 0;
+  const detail = (progress.thumbnailCleanupErrorDetails || [])[0];
+  status.hidden = false;
+  if (errors) {
+    status.textContent = state.language === 'ja'
+      ? `${total}件を確認し、${removed}件を削除、${errors}件の削除に失敗しました。${detail ? ` ${detail}` : ''}`
+      : `Checked ${total} thumbnails; removed ${removed}; ${errors} deletions failed.${detail ? ` ${detail}` : ''}`;
+    return;
+  }
+  status.textContent = state.language === 'ja'
+    ? (removed ? `${total}件を確認し、不要なサムネイルを${removed}件削除しました。` : `${total}件を確認しました。不要なサムネイルはありません。`)
+    : (removed ? `Checked ${total} thumbnails and removed ${removed} unused files.` : `Checked ${total} thumbnails. No unused thumbnails were found.`);
 }
 
 function showThumbnailResult(progress) {

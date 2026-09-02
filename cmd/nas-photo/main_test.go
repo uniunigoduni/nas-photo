@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -213,6 +214,56 @@ func TestThumbnailFailuresAreShownInGallery(t *testing.T) {
 	} {
 		if !strings.Contains(source, feature) {
 			t.Fatalf("thumbnail result feedback is missing %q", feature)
+		}
+	}
+}
+
+func TestThumbnailCleanupRemovesOnlyUnusedJPEGs(t *testing.T) {
+	dir := t.TempDir()
+	cache := filepath.Join(dir, "cache")
+	if err := os.MkdirAll(cache, 0700); err != nil {
+		t.Fatal(err)
+	}
+	item := Item{ID: "image", Size: 123, Modified: time.Unix(0, 456)}
+	valid := thumbnailKey(item)
+	for name, content := range map[string]string{
+		valid: "valid", "obsolete.jpg": "old", "leave.txt": "other",
+	} {
+		if err := os.WriteFile(filepath.Join(cache, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a := &app{cacheDir: cache, items: []Item{item}, thumbnailCleaning: true}
+	a.cleanupThumbnails()
+	if _, err := os.Stat(filepath.Join(cache, valid)); err != nil {
+		t.Fatalf("valid thumbnail was removed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(cache, "obsolete.jpg")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("obsolete thumbnail was not removed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(cache, "leave.txt")); err != nil {
+		t.Fatalf("non-thumbnail cache file was removed: %v", err)
+	}
+	if a.thumbnailCleaning || a.thumbCleanupDone != 2 || a.thumbCleanupTotal != 2 || a.thumbCleanupRemoved != 1 || a.thumbCleanupErrors != 0 {
+		t.Fatalf("unexpected cleanup state: running=%v done=%d total=%d removed=%d errors=%d",
+			a.thumbnailCleaning, a.thumbCleanupDone, a.thumbCleanupTotal, a.thumbCleanupRemoved, a.thumbCleanupErrors)
+	}
+}
+
+func TestThumbnailCleanupIsAvailableInScanMenu(t *testing.T) {
+	sourceBytes, err := assets.ReadFile("web/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(sourceBytes)
+	for _, feature := range []string{
+		"cleanupThumbnails:'不要なサムネイルを調査して削除'",
+		"'/api/thumbnails/cleanup'",
+		"progress.thumbnailCleaning",
+		"function showThumbnailCleanupResult(progress)",
+	} {
+		if !strings.Contains(source, feature) {
+			t.Fatalf("thumbnail cleanup UI is missing %q", feature)
 		}
 	}
 }

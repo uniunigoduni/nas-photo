@@ -332,6 +332,38 @@ func TestSameUploadFilesUsesSourcePathAndSize(t *testing.T) {
 	}
 }
 
+func TestCopyUploadFileReportsProgress(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "source.bin")
+	destination := filepath.Join(dir, "destination.bin")
+	data := make([]byte, 3<<20+123)
+	for i := range data {
+		data[i] = byte(i)
+	}
+	if err := os.WriteFile(source, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	var last int64
+	calls := 0
+	err := copyUploadFile(source, destination, int64(len(data)), func(done int64) {
+		if done < last {
+			t.Fatalf("upload copy progress moved backwards: %d -> %d", last, done)
+		}
+		last = done
+		calls++
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if last != int64(len(data)) || calls < 2 {
+		t.Fatalf("unexpected progress reports: last=%d calls=%d", last, calls)
+	}
+	info, err := os.Stat(destination)
+	if err != nil || info.Size() != int64(len(data)) {
+		t.Fatalf("copied file size mismatch: %v, %v", info, err)
+	}
+}
+
 func TestUploadWebShellLoadsDragAndDropAssets(t *testing.T) {
 	index, err := assets.ReadFile("web/index.html")
 	if err != nil {
@@ -348,7 +380,7 @@ func TestUploadWebShellLoadsDragAndDropAssets(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := string(script)
-	for _, expected := range []string{"webkitGetAsEntry", "getAsFileSystemHandle", "walkWebkitEntry", "SUPPORTED_EXTENSIONS", "appendDroppedFile", "!items.length || !output.length", "compareText", "dropInProgress"} {
+	for _, expected := range []string{"webkitGetAsEntry", "getAsFileSystemHandle", "walkWebkitEntry", "SUPPORTED_EXTENSIONS", "appendDroppedFile", "!items.length || !output.length", "compareText", "dropInProgress", "UPLOAD_PHASE_WEIGHT", "commitBatchWithProgress", "/progress"} {
 		if !strings.Contains(source, expected) {
 			t.Fatalf("drag-and-drop folder support is missing %q", expected)
 		}
