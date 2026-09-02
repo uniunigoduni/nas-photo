@@ -842,6 +842,7 @@ func (a *app) media(w http.ResponseWriter, r *http.Request) {
 	}
 	filter := r.URL.Query().Get("filter")
 	sortBy := r.URL.Query().Get("sort")
+	subSort := r.URL.Query().Get("subsort")
 	order := r.URL.Query().Get("order")
 	a.scanMu.Lock()
 	items := append([]Item(nil), a.items...)
@@ -856,7 +857,7 @@ func (a *app) media(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, x)
 	}
-	sortItems(out, sortBy, order, r.URL.Query().Get("seed"))
+	sortItems(out, sortBy, order, r.URL.Query().Get("seed"), subSort)
 	total := len(out)
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
@@ -880,7 +881,7 @@ func (a *app) media(w http.ResponseWriter, r *http.Request) {
 	jsonOut(w, map[string]any{"items": out[offset:end], "total": total, "nextOffset": next})
 }
 
-func sortItems(items []Item, sortBy, order, seed string) {
+func sortItems(items []Item, sortBy, order, seed, subSort string) {
 	if sortBy == "random" {
 		keys := make(map[string][sha256.Size]byte, len(items))
 		for _, item := range items {
@@ -896,7 +897,21 @@ func sortItems(items []Item, sortBy, order, seed string) {
 		return
 	}
 	ascending := order == "asc"
+	dateSubSort := subSort == "same-day-name" && (sortBy == "captured" || sortBy == "created" || sortBy == "modified")
 	sort.SliceStable(items, func(i, j int) bool {
+		if dateSubSort {
+			leftDay, rightDay := calendarDayKey(items[i].Modified), calendarDayKey(items[j].Modified)
+			if leftDay != rightDay {
+				if ascending {
+					return leftDay < rightDay
+				}
+				return leftDay > rightDay
+			}
+			if cmp := strings.Compare(strings.ToLower(items[i].Name), strings.ToLower(items[j].Name)); cmp != 0 {
+				return cmp < 0
+			}
+			return items[i].ID < items[j].ID
+		}
 		var cmp int
 		if sortBy == "name" {
 			cmp = strings.Compare(strings.ToLower(items[i].Name), strings.ToLower(items[j].Name))
@@ -913,6 +928,12 @@ func sortItems(items []Item, sortBy, order, seed string) {
 		return cmp > 0
 	})
 }
+
+func calendarDayKey(value time.Time) int {
+	year, month, day := value.Date()
+	return year*10000 + int(month)*100 + day
+}
+
 func (a *app) mediaByID(w http.ResponseWriter, r *http.Request) {
 	if !a.authed(w, r) {
 		return
@@ -1322,7 +1343,7 @@ func (a *app) neighbors(w http.ResponseWriter, r *http.Request, current string) 
 	a.scanMu.Lock()
 	items := append([]Item(nil), a.items...)
 	a.scanMu.Unlock()
-	sortItems(items, r.URL.Query().Get("sort"), r.URL.Query().Get("order"), r.URL.Query().Get("seed"))
+	sortItems(items, r.URL.Query().Get("sort"), r.URL.Query().Get("order"), r.URL.Query().Get("seed"), r.URL.Query().Get("subsort"))
 	for i, x := range items {
 		if x.ID == current {
 			v := map[string]any{}

@@ -42,13 +42,31 @@ func TestSortItemsIsStableAndRespectsOrder(t *testing.T) {
 		{ID: "a", Name: "same.jpg", Modified: now},
 		{ID: "c", Name: "z.jpg", Modified: now.Add(time.Hour)},
 	}
-	sortItems(items, "modified", "asc", "")
+	sortItems(items, "modified", "asc", "", "")
 	if items[0].ID != "a" || items[1].ID != "b" || items[2].ID != "c" {
 		t.Fatalf("unexpected ascending order: %#v", items)
 	}
-	sortItems(items, "modified", "desc", "")
+	sortItems(items, "modified", "desc", "", "")
 	if items[0].ID != "c" {
 		t.Fatalf("unexpected descending order: %#v", items)
+	}
+}
+
+func TestDateSortCanUseNameWithinSameDay(t *testing.T) {
+	dayOne := time.Date(2026, 9, 3, 8, 0, 0, 0, time.Local)
+	dayTwo := dayOne.AddDate(0, 0, 1)
+	items := []Item{
+		{ID: "z", Name: "Zeta.jpg", Modified: dayOne},
+		{ID: "a", Name: "alpha.jpg", Modified: dayOne.Add(12 * time.Hour)},
+		{ID: "m", Name: "Middle.jpg", Modified: dayTwo},
+	}
+	sortItems(items, "modified", "asc", "", "same-day-name")
+	if items[0].ID != "a" || items[1].ID != "z" || items[2].ID != "m" {
+		t.Fatalf("unexpected same-day ascending order: %#v", items)
+	}
+	sortItems(items, "modified", "desc", "", "same-day-name")
+	if items[0].ID != "m" || items[1].ID != "a" || items[2].ID != "z" {
+		t.Fatalf("unexpected same-day descending order: %#v", items)
 	}
 }
 
@@ -60,9 +78,9 @@ func TestRandomSortIsStableForSeedAndChangesWithNewSeed(t *testing.T) {
 	first := append([]Item(nil), items...)
 	second := append([]Item(nil), items...)
 	third := append([]Item(nil), items...)
-	sortItems(first, "random", "asc", "seed-one")
-	sortItems(second, "random", "desc", "seed-one")
-	sortItems(third, "random", "asc", "seed-two")
+	sortItems(first, "random", "asc", "seed-one", "")
+	sortItems(second, "random", "desc", "seed-one", "")
+	sortItems(third, "random", "asc", "seed-two", "")
 	for i := range first {
 		if first[i].ID != second[i].ID {
 			t.Fatalf("same random seed produced different order at %d: %s != %s", i, first[i].ID, second[i].ID)
@@ -87,12 +105,53 @@ func TestRandomSortMenuUsesOneSeedAcrossPageLoads(t *testing.T) {
 	}
 	source := string(sourceBytes)
 	for _, feature := range []string{
-		"[t('random'), 'random']",
+		"choice(t('random'), 'sort', 'random', draft.sort === 'random')",
 		"seed: state.randomSeed",
-		"if (value === 'random') state.randomSeed = createRandomSeed()",
+		"if (draft.sort === 'random' && previous !== 'random') draft.randomSeed = createRandomSeed()",
 	} {
 		if !strings.Contains(source, feature) {
 			t.Fatalf("random sort UI is missing %q", feature)
+		}
+	}
+}
+
+func TestSortMenuSupportsSameDayNameSubSort(t *testing.T) {
+	sourceBytes, err := assets.ReadFile("web/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(sourceBytes)
+	for _, feature := range []string{
+		"subSort: stored.subSort || ''",
+		"subsort: state.subSort",
+		"choice(t('sameDayName'), 'subsort', 'same-day-name'",
+		"!dateSort)",
+		"draft.subSort = button.dataset.value",
+	} {
+		if !strings.Contains(source, feature) {
+			t.Fatalf("same-day name sub-sort UI is missing %q", feature)
+		}
+	}
+}
+
+func TestSortDialogStagesChangesUntilApply(t *testing.T) {
+	sourceBytes, err := assets.ReadFile("web/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(sourceBytes)
+	for _, feature := range []string{
+		"function showSortDialog()",
+		"sort: state.sort",
+		"aria-pressed=\"${selected}\"",
+		"if (!isDateSort()) draft.subSort = ''",
+		"$('#sort-apply', overlay).onclick",
+		"state.sort = draft.sort",
+		"state.subSort = draft.subSort",
+		"savePreferences();",
+	} {
+		if !strings.Contains(source, feature) {
+			t.Fatalf("staged sort dialog is missing %q", feature)
 		}
 	}
 }

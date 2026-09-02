@@ -211,6 +211,25 @@ label { display: grid; gap: .4rem; color: #dbe5f6; }
 }
 .option-dialog legend { padding-inline: .4rem; color: #bdc9db; }
 .option-dialog .option { min-width: 100px; border-radius: 10px; }
+.sort-dialog-lower {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: .75rem;
+}
+.sort-dialog-lower fieldset {
+  margin: 0;
+}
+.sort-dialog .option.selected {
+  background: #fff;
+  color: #101827;
+  box-shadow: none;
+}
+.sort-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: .6rem;
+  margin-top: 1rem;
+}
 .viewer {
   position: fixed;
   inset: 0;

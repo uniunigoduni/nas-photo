@@ -31,7 +31,8 @@ const messages = {
     all:'All', images:'Images & GIFs', videos:'Videos', ascending:'Ascending', descending:'Descending',
     river:'River', square:'Square', small:'Small', medium:'Medium', large:'Large',
     mediaTip:'Open this media', sortBasis:'Sort by', order:'Order', display:'Layout', size:'Size',
-    mediaType:'Media type', index:'Library index', rescanNow:'Scan media folders',
+    mediaType:'Media type', index:'Library index', rescanNow:'Scan media folders', applySort:'Apply',
+    subSort:'Secondary', noSubSort:'None', sameDayName:'Name within same day',
     thumbnails:'Thumbnails', generateThumbnails:'Generate all missing thumbnails',
     regenerateThumbnails:'Regenerate all thumbnails', cleanupThumbnails:'Find and delete unused thumbnails',
     thumbnailWorking:'Generating thumbnails…', thumbnailCleanupWorking:'Checking thumbnail cache…',
@@ -81,7 +82,8 @@ const messages = {
     all:'すべて', images:'画像・GIF', videos:'動画', ascending:'昇順', descending:'降順',
     river:'リバー', square:'正方形', small:'小', medium:'中', large:'大',
     mediaTip:'このメディアを表示', sortBasis:'基準', order:'順序', display:'表示方法', size:'大きさ',
-    mediaType:'表示する種類', index:'索引', rescanNow:'メディアフォルダをスキャン',
+    mediaType:'表示する種類', index:'索引', rescanNow:'メディアフォルダをスキャン', applySort:'変更',
+    subSort:'サブ基準', noSubSort:'なし', sameDayName:'同日中は名前順',
     thumbnails:'サムネイル', generateThumbnails:'未作成のサムネイルを一括生成',
     regenerateThumbnails:'サムネイルをすべて再生成', cleanupThumbnails:'不要なサムネイルを調査して削除',
     thumbnailWorking:'サムネイルを生成しています…', thumbnailCleanupWorking:'サムネイルキャッシュを確認しています…',
@@ -130,6 +132,7 @@ const state = {
   total: 0,
   nextOffset: 0,
   sort: stored.sort || 'modified',
+  subSort: stored.subSort || '',
   randomSeed: stored.randomSeed || createRandomSeed(),
   order: stored.order || 'desc',
   filter: stored.filter || '',
@@ -176,7 +179,7 @@ function setLanguage(language) {
 
 function savePreferences() {
   localStorage.setItem('nas-photo-preferences', JSON.stringify({
-    sort: state.sort, randomSeed: state.randomSeed, order: state.order, filter: state.filter,
+    sort: state.sort, subSort: state.subSort, randomSeed: state.randomSeed, order: state.order, filter: state.filter,
     layout: state.layout, size: state.size, loop: state.loop, muted: state.muted
   }));
 }
@@ -374,7 +377,7 @@ async function loadSettings() {
 
 function queryString(offset = 0) {
   return new URLSearchParams({
-    sort: state.sort, order: state.order, seed: state.randomSeed, filter: state.filter,
+    sort: state.sort, subsort: state.subSort, order: state.order, seed: state.randomSeed, filter: state.filter,
     offset: String(offset), limit: '200'
   }).toString();
 }
@@ -493,8 +496,10 @@ function renderTiles(append = false) {
   }
   const sortLabels = {captured: t('captured'), created: t('created'), modified: t('modified'), name: t('name'), random: t('random')};
   const filterLabels = {'': t('all'), image: t('images'), video: t('videos')};
+  const subSortLabel = state.subSort === 'same-day-name' && ['captured', 'created', 'modified'].includes(state.sort)
+    ? ` · ${t('sameDayName')}` : '';
   $('#selection-summary').textContent =
-    `${sortLabels[state.sort]}${state.sort === 'random' ? '' : ` · ${state.order === 'asc' ? t('ascending') : t('descending')}`} / ` +
+    `${sortLabels[state.sort]}${state.sort === 'random' ? '' : ` · ${state.order === 'asc' ? t('ascending') : t('descending')}`}${subSortLabel} / ` +
     `${state.layout === 'river' ? t('river') : t('square')} · ${{small:t('small'),medium:t('medium'),large:t('large')}[state.size]} / ` +
     `${filterLabels[state.filter]} · ${state.total}`;
 }
@@ -573,18 +578,7 @@ function layoutRiverGallery() {
 }
 
 function bindGalleryControls() {
-  $('#sort-menu').onclick = () => optionDialog(t('sort'), [
-    [t('sortBasis'), [[t('captured'), 'captured'], [t('created'), 'created'], [t('modified'), 'modified'], [t('name'), 'name'], [t('random'), 'random']]],
-    [t('order'), [[t('ascending'), 'asc'], [t('descending'), 'desc']]]
-  ], value => {
-    if (value === 'asc' || value === 'desc') {
-      state.order = value;
-    } else {
-      state.sort = value;
-      if (value === 'random') state.randomSeed = createRandomSeed();
-    }
-    savePreferences(); showGallery();
-  });
+  $('#sort-menu').onclick = showSortDialog;
   $('#view-menu').onclick = () => optionDialog(t('view'), [
     [t('display'), [[t('square'), 'square'], [t('river'), 'river']]],
     [t('size'), [[t('small'), 'small'], [t('medium'), 'medium'], [t('large'), 'large']]]
@@ -630,12 +624,82 @@ function bindGalleryControls() {
   $('#settings').onclick = showSettingsHome;
 }
 
+function showSortDialog() {
+  const overlay = document.createElement('div');
+  overlay.className = 'dialog option-dialog sort-dialog';
+  const draft = {
+    sort: state.sort,
+    order: state.order,
+    subSort: state.subSort,
+    randomSeed: state.randomSeed
+  };
+  const isDateSort = () => ['captured', 'created', 'modified'].includes(draft.sort);
+  const choice = (label, group, value, selected, disabled = false) =>
+    `<button class="secondary option${selected ? ' selected' : ''}" data-group="${group}" data-value="${value}" aria-pressed="${selected}" ${disabled ? 'disabled' : ''}>${escapeHTML(label)}</button>`;
+
+  const render = () => {
+    const dateSort = isDateSort();
+    overlay.innerHTML = `<section class="card" role="dialog" aria-modal="true"><h2>${escapeHTML(t('sort'))}</h2>
+      <fieldset><legend>${escapeHTML(t('sortBasis'))}</legend>
+        ${choice(t('captured'), 'sort', 'captured', draft.sort === 'captured')}
+        ${choice(t('created'), 'sort', 'created', draft.sort === 'created')}
+        ${choice(t('modified'), 'sort', 'modified', draft.sort === 'modified')}
+        ${choice(t('name'), 'sort', 'name', draft.sort === 'name')}
+        ${choice(t('random'), 'sort', 'random', draft.sort === 'random')}
+      </fieldset>
+      <div class="sort-dialog-lower">
+        <fieldset><legend>${escapeHTML(t('order'))}</legend>
+          ${choice(t('ascending'), 'order', 'asc', draft.order === 'asc')}
+          ${choice(t('descending'), 'order', 'desc', draft.order === 'desc')}
+        </fieldset>
+        <fieldset><legend>${escapeHTML(t('subSort'))}</legend>
+          ${choice(t('noSubSort'), 'subsort', '', draft.subSort === '')}
+          ${choice(t('sameDayName'), 'subsort', 'same-day-name', draft.subSort === 'same-day-name', !dateSort)}
+        </fieldset>
+      </div>
+      <div class="sort-dialog-actions">
+        <button class="secondary" id="sort-cancel">${escapeHTML(t('cancel'))}</button>
+        <button id="sort-apply">${escapeHTML(t('applySort'))}</button>
+      </div></section>`;
+
+    $$('[data-group="sort"]', overlay).forEach(button => button.onclick = () => {
+      const previous = draft.sort;
+      draft.sort = button.dataset.value;
+      if (!isDateSort()) draft.subSort = '';
+      if (draft.sort === 'random' && previous !== 'random') draft.randomSeed = createRandomSeed();
+      render();
+    });
+    $$('[data-group="order"]', overlay).forEach(button => button.onclick = () => {
+      draft.order = button.dataset.value;
+      render();
+    });
+    $$('[data-group="subsort"]', overlay).forEach(button => button.onclick = () => {
+      draft.subSort = button.dataset.value;
+      render();
+    });
+    $('#sort-cancel', overlay).onclick = () => overlay.remove();
+    $('#sort-apply', overlay).onclick = () => {
+      state.sort = draft.sort;
+      state.order = draft.order;
+      state.subSort = draft.subSort;
+      state.randomSeed = draft.randomSeed;
+      savePreferences();
+      overlay.remove();
+      showGallery();
+    };
+  };
+
+  overlay.addEventListener('click', event => { if (event.target === overlay) overlay.remove(); });
+  document.body.append(overlay);
+  render();
+}
+
 function optionDialog(title, sections, onSelect) {
   const overlay = document.createElement('div');
   overlay.className = 'dialog option-dialog';
   overlay.innerHTML = `<section class="card" role="dialog" aria-modal="true"><h2>${escapeHTML(title)}</h2>
     ${sections.map(([label, options]) => `<fieldset><legend>${escapeHTML(label)}</legend>
-      ${options.map(([text, value]) => `<button class="secondary option" data-value="${escapeHTML(value)}">${escapeHTML(text)}</button>`).join('')}
+      ${options.map(([text, value, disabled = false]) => `<button class="secondary option" data-value="${escapeHTML(value)}" ${disabled ? 'disabled' : ''}>${escapeHTML(text)}</button>`).join('')}
     </fieldset>`).join('')}<button id="option-close">${t('close')}</button></section>`;
   document.body.append(overlay);
   $$('.option', overlay).forEach(button => button.onclick = async () => {
