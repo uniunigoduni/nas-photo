@@ -3,7 +3,6 @@ import '@m3e/web/button';
 import '@m3e/web/icon';
 import '@m3e/web/icon-button';
 import '@m3e/web/dialog';
-import '@m3e/web/toolbar';
 import '@m3e/web/progress-indicator';
 import '@m3e/web/tooltip';
 

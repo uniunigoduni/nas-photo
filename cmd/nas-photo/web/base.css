@@ -1,0 +1,66 @@
+/* Base styles. This file is the sole owner of these selectors. */
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  margin: 0;
+  width: 100%;
+  min-height: 100%;
+  background: var(--nas-color-surface, #0b1020);
+  scrollbar-gutter: stable;
+  color: var(--nas-color-on-surface, #f8fafc);
+}
+
+body {
+  margin: 0;
+  width: 100%;
+  min-height: 100vh;
+  background: var(--nas-color-surface, #0b1020);
+  color: var(--nas-color-on-surface, #f8fafc);
+  font-family: var(--nas-type-body-large-font, Inter, "Segoe UI", system-ui, sans-serif);
+}
+
+#app {
+  width: 100%;
+  min-height: 100vh;
+}
+
+input {
+  font: inherit;
+  width: 100%;
+  min-height: 46px;
+  padding: .75rem .85rem;
+  border: 1px solid var(--nas-color-outline-variant);
+  border-radius: var(--nas-shape-extra-small, 4px);
+  background: var(--nas-color-surface-container-highest, #0b1222);
+  color: var(--nas-color-on-surface, #fff);
+  border-color: var(--nas-color-outline, #68758f);
+}
+
+input:focus-visible {
+  outline: 3px solid var(--nas-color-primary);
+  outline-offset: 2px;
+  outline-color: var(--nas-color-primary, #72a7ff);
+}
+
+label {
+  display: grid;
+  gap: .4rem;
+  color: var(--nas-color-on-surface-variant, #dbe5f6);
+}
+
+.hint {
+  color: var(--nas-color-on-surface-variant, #aebbd0);
+}
+
+.empty {
+  color: var(--nas-color-on-surface-variant, #aebbd0);
+}
+
+.error {
+  color: var(--nas-color-error, #ffabb4);
+  white-space: pre-wrap;
+}
+

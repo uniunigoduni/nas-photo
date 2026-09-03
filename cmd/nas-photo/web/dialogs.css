@@ -1,0 +1,249 @@
+/* Dialogs styles. This file is the sole owner of these selectors. */
+
+.folder-dialog {
+  width: min(720px, 100%);
+}
+
+.folder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+  margin-bottom: .75rem;
+}
+
+.folder-list {
+  display: grid;
+  gap: .4rem;
+  margin-block: .75rem;
+}
+
+.folder-list m3e-button {
+  text-align: left;
+}
+
+.chosen {
+  padding: .7rem;
+  border-radius: 10px;
+  background: var(--nas-color-surface-container-high, #0e1628);
+  word-break: break-all;
+  color: var(--nas-color-on-surface, #fff);
+}
+
+.root-list {
+  display: grid;
+  gap: .55rem;
+  margin-block: 1rem;
+}
+
+.root {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .55rem;
+  border-radius: 11px;
+  background: var(--nas-color-surface-container-high, #0e1628);
+  color: var(--nas-color-on-surface, #fff);
+}
+
+.root code {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+kbd {
+  padding: .25rem .5rem;
+  border: 1px solid #5b6b88;
+  border-radius: 6px;
+  background: var(--nas-color-surface-container-highest, #0c1425);
+  border-color: var(--nas-color-outline, #5b6b88);
+  color: var(--nas-color-on-surface, #fff);
+}
+
+.confirm-check {
+  display: flex;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  margin: 1rem 0;
+}
+
+.confirm-check input {
+  width: 20px;
+  min-height: 20px;
+}
+
+m3e-dialog.option-dialog {
+  --m3e-dialog-shape: var(--nas-shape-extra-large, 28px);
+  --m3e-dialog-container-color: var(--nas-color-surface-container-high, #151d31);
+  --m3e-dialog-color: var(--nas-color-on-surface, #f8fafc);
+  --m3e-dialog-scrim-color: var(--nas-color-scrim, #000);
+  --m3e-dialog-max-width: min(620px, calc(100vw - 2rem));
+}
+
+.option-dialog-sections {
+  display: grid;
+  gap: 1rem;
+}
+
+.sort-dialog-sections {
+  display: grid;
+  gap: 1rem;
+}
+
+.option-section {
+  display: grid;
+  gap: .65rem;
+  min-width: 0;
+  padding: .8rem;
+  border-radius: var(--nas-shape-large, 16px);
+  background: var(--nas-color-surface-container, #151d31);
+}
+
+.option-legend {
+  color: var(--nas-color-on-surface-variant, #bdc9db);
+  font: var(--nas-type-label-large, 500 .9rem/1.3 system-ui);
+}
+
+.sort-choice-grid {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.option-choice-grid {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.sort-choice-grid > m3e-button {
+  flex: 0 0 auto;
+  max-width: 100%;
+}
+
+.option-choice-grid > m3e-button {
+  flex: 0 0 auto;
+  max-width: 100%;
+}
+
+.dialog-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: center;
+  gap: .75rem;
+  width: 100%;
+}
+
+.dialog-actions > m3e-button {
+  width: 100%;
+  min-width: 0;
+}
+
+.dialog-actions-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.option-dialog m3e-button[toggle] {
+  --m3e-button-selected-container-color: #fff;
+  --m3e-button-selected-label-text-color: #101827;
+  --m3e-button-hover-selected-label-text-color: #101827;
+  --m3e-button-focus-selected-label-text-color: #101827;
+}
+
+m3e-dialog.settings-dialog {
+  --m3e-dialog-min-width: min(720px, calc(100vw - 2rem));
+  --m3e-dialog-max-width: min(720px, calc(100vw - 2rem));
+}
+
+.settings-dialog-body {
+  display: grid;
+  align-content: start;
+  gap: .75rem;
+  min-height: min(500px, calc(100vh - 220px));
+}
+
+.settings-dialog-menu {
+  display: grid;
+  gap: .75rem;
+}
+
+.settings-shortcut-list {
+  display: grid;
+  gap: .75rem;
+}
+
+.settings-root-list {
+  display: grid;
+  gap: .75rem;
+}
+
+.settings-dialog-item {
+  width: 100%;
+  min-width: 0;
+  text-align: center;
+}
+
+.settings-dialog .shortcut {
+  width: 100%;
+  min-width: 0;
+  text-align: center;
+}
+
+.settings-root-list > m3e-button {
+  width: 100%;
+  min-width: 0;
+  text-align: center;
+}
+
+.settings-dialog-item.danger {
+  --m3e-filled-button-container-color: var(--nas-color-error, #ff5449);
+  --m3e-filled-button-label-text-color: var(--nas-color-on-error, #fff);
+  --m3e-filled-button-hover-label-text-color: var(--nas-color-on-error, #fff);
+  --m3e-filled-button-focus-label-text-color: var(--nas-color-on-error, #fff);
+  --m3e-filled-button-pressed-label-text-color: var(--nas-color-on-error, #fff);
+  --m3e-filled-button-hover-state-layer-color: var(--nas-color-on-error, #fff);
+  --m3e-filled-button-focus-state-layer-color: var(--nas-color-on-error, #fff);
+  --m3e-filled-button-pressed-state-layer-color: var(--nas-color-on-error, #fff);
+}
+
+.settings-language-grid {
+  width: 100%;
+}
+
+.settings-language-grid > m3e-button {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.shortcut-content {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .75rem;
+  max-width: 100%;
+  text-align: center;
+}
+
+.shortcut-content kbd {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2rem;
+  line-height: 1;
+}
+
+.settings-dialog .root {
+  margin: 0;
+}
+
+.settings-root-list > #settings-add-root {
+  min-height: 48px;
+}

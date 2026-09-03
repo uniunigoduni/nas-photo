@@ -35,6 +35,28 @@ func writeTestJPEG(t *testing.T, path string, width, height int) {
 	}
 }
 
+func readWebAssetSet(t *testing.T, names ...string) string {
+	t.Helper()
+	var joined strings.Builder
+	for _, name := range names {
+		content, err := assets.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		joined.Write(content)
+		joined.WriteByte('\n')
+	}
+	return joined.String()
+}
+
+func webJavaScript(t *testing.T) string {
+	return readWebAssetSet(t, "web/core.js", "web/shell.js", "web/gallery.js", "web/dialogs.js", "web/viewer.js", "web/viewer-zoom.js", "web/viewer-gestures.js", "web/settings.js", "web/runtime.js")
+}
+
+func webStyles(t *testing.T) string {
+	return readWebAssetSet(t, "web/theme.css", "web/base.css", "web/shell.css", "web/gallery.css", "web/dialogs.css", "web/viewer.css", "web/upload.css")
+}
+
 func TestSortItemsIsStableAndRespectsOrder(t *testing.T) {
 	now := time.Now()
 	items := []Item{
@@ -99,11 +121,7 @@ func TestRandomSortIsStableForSeedAndChangesWithNewSeed(t *testing.T) {
 }
 
 func TestRandomSortMenuUsesOneSeedAcrossPageLoads(t *testing.T) {
-	sourceBytes, err := assets.ReadFile("web/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := string(sourceBytes)
+	source := webJavaScript(t)
 	for _, feature := range []string{
 		"choice(t('random'), 'sort', 'random', draft.sort === 'random')",
 		"seed: state.randomSeed",
@@ -116,11 +134,7 @@ func TestRandomSortMenuUsesOneSeedAcrossPageLoads(t *testing.T) {
 }
 
 func TestSortMenuSupportsSameDayNameSubSort(t *testing.T) {
-	sourceBytes, err := assets.ReadFile("web/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := string(sourceBytes)
+	source := webJavaScript(t)
 	for _, feature := range []string{
 		"subSort: stored.subSort || ''",
 		"subsort: state.subSort",
@@ -135,11 +149,7 @@ func TestSortMenuSupportsSameDayNameSubSort(t *testing.T) {
 }
 
 func TestSortDialogStagesChangesUntilApply(t *testing.T) {
-	sourceBytes, err := assets.ReadFile("web/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := string(sourceBytes)
+	source := webJavaScript(t)
 	for _, feature := range []string{
 		"function showSortDialog()",
 		"sort: state.sort",
@@ -167,11 +177,7 @@ func TestSortDialogStagesChangesUntilApply(t *testing.T) {
 }
 
 func TestTopOptionDialogsStageChangesUntilSave(t *testing.T) {
-	sourceBytes, err := assets.ReadFile("web/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := string(sourceBytes)
+	source := webJavaScript(t)
 	for _, feature := range []string{
 		"function optionDialog(title, sections, initialValues, onSave)",
 		"const draft = {...initialValues}",
@@ -189,11 +195,7 @@ func TestTopOptionDialogsStageChangesUntilSave(t *testing.T) {
 }
 
 func TestScanDialogRunsActionsImmediately(t *testing.T) {
-	sourceBytes, err := assets.ReadFile("web/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := string(sourceBytes)
+	source := webJavaScript(t)
 	for _, feature := range []string{
 		"$('#scan-menu').onclick = () => actionDialog(t('rescan')",
 		"function actionDialog(title, sections, onSelect)",
@@ -214,7 +216,7 @@ func TestMaterialExpressiveShellIsBundledLocally(t *testing.T) {
 	index := string(indexBytes)
 	for _, feature := range []string{
 		"m3e.bundle.js",
-		"m3e-overrides.css",
+		"theme.css",
 		"<m3e-theme color=\"#72a7ff\" variant=\"neutral\" scheme=\"dark\" motion=\"expressive\" strong-focus>",
 	} {
 		if !strings.Contains(index, feature) {
@@ -228,11 +230,7 @@ func TestMaterialExpressiveShellIsBundledLocally(t *testing.T) {
 }
 
 func TestGalleryHeaderShowsTitleIconsAndSettings(t *testing.T) {
-	sourceBytes, err := assets.ReadFile("web/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := string(sourceBytes)
+	source := webJavaScript(t)
 	for _, feature := range []string{
 		`<strong class="top-title">NAS-PHOTO</strong>`,
 		`<div class="top top-actions" aria-label="NAS-PHOTO"`,
@@ -253,7 +251,10 @@ func TestGalleryHeaderShowsTitleIconsAndSettings(t *testing.T) {
 }
 
 func TestExpressiveMotionRunsDoubleSpeedWithoutOSMotionPreference(t *testing.T) {
-	for _, name := range []string{"web/app.js", "web/style.css", "web/m3e-overrides.css", "web/m3e.bundle.js"} {
+	for _, name := range []string{
+		"web/core.js", "web/shell.js", "web/gallery.js", "web/dialogs.js", "web/viewer.js", "web/viewer-zoom.js", "web/viewer-gestures.js", "web/settings.js", "web/runtime.js",
+		"web/theme.css", "web/base.css", "web/shell.css", "web/gallery.css", "web/dialogs.css", "web/viewer.css", "web/upload.css", "web/m3e.bundle.js",
+	} {
 		content, err := assets.ReadFile(name)
 		if err != nil {
 			t.Fatal(err)
@@ -262,7 +263,7 @@ func TestExpressiveMotionRunsDoubleSpeedWithoutOSMotionPreference(t *testing.T) 
 			t.Fatalf("%s still depends on the OS reduced-motion preference", name)
 		}
 	}
-	overrides, err := assets.ReadFile("web/m3e-overrides.css")
+	overrides, err := assets.ReadFile("web/theme.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -383,11 +384,7 @@ func TestMissingFFmpegIsReportedByBulkThumbnailGeneration(t *testing.T) {
 }
 
 func TestThumbnailFailuresAreShownInGallery(t *testing.T) {
-	sourceBytes, err := assets.ReadFile("web/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := string(sourceBytes)
+	source := webJavaScript(t)
 	for _, feature := range []string{
 		"monitorScan(state.galleryToken, false, true)",
 		"progress.thumbnailErrorDetails",
@@ -432,11 +429,7 @@ func TestThumbnailCleanupRemovesOnlyUnusedJPEGs(t *testing.T) {
 }
 
 func TestThumbnailCleanupIsAvailableInScanMenu(t *testing.T) {
-	sourceBytes, err := assets.ReadFile("web/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := string(sourceBytes)
+	source := webJavaScript(t)
 	for _, feature := range []string{
 		"cleanupThumbnails:'不要なサムネイルを調査して削除'",
 		"'/api/thumbnails/cleanup'",
@@ -501,11 +494,7 @@ func TestStoreLoadAddsNewShortcutDefaults(t *testing.T) {
 }
 
 func TestWebDefaultsToEnglishWithoutSetupStepCounters(t *testing.T) {
-	content, err := assets.ReadFile("web/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := string(content)
+	source := webJavaScript(t)
 	if !strings.Contains(source, "localStorage.getItem('nas-photo-language') || 'en'") {
 		t.Fatal("web UI does not default to English")
 	}
@@ -518,11 +507,7 @@ func TestWebDefaultsToEnglishWithoutSetupStepCounters(t *testing.T) {
 }
 
 func TestEmptyGalleryDoesNotRestartScanMonitor(t *testing.T) {
-	content, err := assets.ReadFile("web/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := string(content)
+	source := webJavaScript(t)
 	if strings.Contains(source, "else if (state.total === 0)") {
 		t.Fatal("an empty gallery still restarts itself from the scan monitor")
 	}
@@ -533,11 +518,7 @@ func TestEmptyGalleryDoesNotRestartScanMonitor(t *testing.T) {
 }
 
 func TestViewerKeepsGalleryMountedWhenOpenedAndClosed(t *testing.T) {
-	content, err := assets.ReadFile("web/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := string(content)
+	source := webJavaScript(t)
 	if !strings.Contains(source, "app.append(layer)") ||
 		!strings.Contains(source, "layer.className = 'viewer-layer'") {
 		t.Fatal("viewer is not layered over the existing gallery")
@@ -557,12 +538,8 @@ func TestViewerKeepsGalleryMountedWhenOpenedAndClosed(t *testing.T) {
 }
 
 func TestRiverGalleryDoesNotRelayoutForEveryThumbnail(t *testing.T) {
-	content, err := assets.ReadFile("web/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := string(content)
-	if !strings.Contains(source, "renderTiles(offset > 0)") ||
+	source := webJavaScript(t)
+	if !strings.Contains(source, "updateGalleryItems(offset > 0)") ||
 		!strings.Contains(source, "gallery.insertAdjacentHTML('beforeend'") {
 		t.Fatal("additional media pages still rebuild the existing gallery")
 	}
@@ -582,7 +559,7 @@ func TestRiverGalleryDoesNotRelayoutForEveryThumbnail(t *testing.T) {
 	if strings.Contains(updateSource, "scheduleRiverLayout()") {
 		t.Fatal("each thumbnail still triggers a visible river relayout")
 	}
-	styles, err := assets.ReadFile("web/style.css")
+	styles, err := assets.ReadFile("web/base.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -596,11 +573,7 @@ func TestRiverGalleryDoesNotRelayoutForEveryThumbnail(t *testing.T) {
 }
 
 func TestGalleryAutomaticallyLoadsEveryMediaPage(t *testing.T) {
-	content, err := assets.ReadFile("web/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := string(content)
+	source := webJavaScript(t)
 	if strings.Contains(source, `id="load-more"`) {
 		t.Fatal("manual load-more control is still rendered")
 	}
@@ -614,11 +587,7 @@ func TestGalleryAutomaticallyLoadsEveryMediaPage(t *testing.T) {
 }
 
 func TestViewerSwipeFollowsPointerAndSettles(t *testing.T) {
-	content, err := assets.ReadFile("web/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := string(content)
+	source := webJavaScript(t)
 	for _, expected := range []string{
 		`class="swipe-track"`,
 		`const GESTURE_AXIS_HYSTERESIS = 10`,
@@ -639,12 +608,8 @@ func TestViewerSwipeFollowsPointerAndSettles(t *testing.T) {
 			t.Fatalf("viewer swipe is missing %q", expected)
 		}
 	}
-	styles, err := assets.ReadFile("web/style.css")
-	if err != nil {
-		t.Fatal(err)
-	}
-	styleSource := string(styles)
-	if !strings.Contains(styleSource, ".swipe-track.is-dragging, .swipe-track.is-settling") {
+	styleSource := webStyles(t)
+	if !strings.Contains(styleSource, ".swipe-track.is-dragging") || !strings.Contains(styleSource, ".swipe-track.is-settling") {
 		t.Fatal("viewer swipe does not expose drag/settle state")
 	}
 	if strings.Contains(styleSource, ".swipe-track.is-settling {\n  transition: transform") {
@@ -680,11 +645,7 @@ func TestViewerSwipeFollowsPointerAndSettles(t *testing.T) {
 }
 
 func TestViewerZoomUsesGestureLocationAndSupportsPanning(t *testing.T) {
-	content, err := assets.ReadFile("web/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := string(content)
+	source := webJavaScript(t)
 	for _, expected := range []string{
 		`const DOUBLE_TAP_IMAGE_ZOOM = 2.5`,
 		`const GESTURE_LOWER_ZOOM_FRICTION = 0.15`,
@@ -714,11 +675,7 @@ func TestViewerZoomUsesGestureLocationAndSupportsPanning(t *testing.T) {
 	if strings.Count(source, "suppressNextViewerClick();") < 5 {
 		t.Fatal("viewer does not consistently suppress clicks after drag gestures finish")
 	}
-	styles, err := assets.ReadFile("web/style.css")
-	if err != nil {
-		t.Fatal(err)
-	}
-	styleSource := string(styles)
+	styleSource := webStyles(t)
 	if !strings.Contains(styleSource, ".zoomable.is-zoomed") ||
 		!strings.Contains(styleSource, "touch-action: none") {
 		t.Fatal("viewer zoom does not expose draggable image styling or reserve touch gestures")
@@ -726,11 +683,7 @@ func TestViewerZoomUsesGestureLocationAndSupportsPanning(t *testing.T) {
 }
 
 func TestViewerKeepsThumbnailUntilFullImageIsDecoded(t *testing.T) {
-	content, err := assets.ReadFile("web/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := string(content)
+	source := webJavaScript(t)
 	for _, expected := range []string{
 		`class="viewer-image-stage"`,
 		`class="media viewer-image-placeholder"`,
@@ -743,18 +696,15 @@ func TestViewerKeepsThumbnailUntilFullImageIsDecoded(t *testing.T) {
 			t.Fatalf("viewer image transition is missing %q", expected)
 		}
 	}
-	styles, err := assets.ReadFile("web/style.css")
-	if err != nil {
-		t.Fatal(err)
-	}
-	styleSource := string(styles)
+	styleSource := webStyles(t)
 	if strings.Contains(styleSource, ".viewer-image-stage.is-loaded .viewer-image-placeholder") {
 		t.Fatal("viewer placeholder fades out while the full image fades in, which can darken the image")
 	}
 	for _, expected := range []string{
 		`--nas-gallery-image-reveal-duration: 140ms`,
 		`transition: opacity var(--nas-gallery-image-reveal-duration) ease-out`,
-		`.viewer-image-stage.is-loaded .viewer-image-full { opacity: 1; }`,
+		`.viewer-image-stage.is-loaded .viewer-image-full`,
+		`opacity: 1;`,
 	} {
 		if !strings.Contains(styleSource, expected) {
 			t.Fatalf("viewer-only image reveal is missing %q", expected)
@@ -779,11 +729,7 @@ func TestViewerKeepsThumbnailUntilFullImageIsDecoded(t *testing.T) {
 }
 
 func TestViewerReusesAdjacentPreviewWithoutDarkGap(t *testing.T) {
-	content, err := assets.ReadFile("web/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := string(content)
+	source := webJavaScript(t)
 	for _, expected := range []string{
 		`function takeViewerSwipePreview(paneIndex, delta)`,
 		`preview.remove()`,
@@ -792,7 +738,7 @@ func TestViewerReusesAdjacentPreviewWithoutDarkGap(t *testing.T) {
 		`const retainedPreview = next.kind === 'video' ? null : takeViewerSwipePreview(paneIndex, delta)`,
 		`openViewer(next.id, paneIndex, swipeOffset, swipeVelocity, retainedPreview)`,
 		`image.addEventListener('transitionend', onRevealEnd)`,
-		`setTimeout(removePlaceholder, GALLERY_IMAGE_REVEAL_MS + 100)`,
+		`cssTimeMilliseconds(getComputedStyle(stage).getPropertyValue('--nas-gallery-image-reveal-duration')) + 100`,
 	} {
 		if !strings.Contains(source, expected) {
 			t.Fatalf("viewer preview handoff is missing %q", expected)
@@ -841,11 +787,7 @@ func TestMakeImageThumbnail(t *testing.T) {
 	}
 }
 func TestMaterialTooltipDoesNotBreakViewerOpen(t *testing.T) {
-	sourceBytes, err := assets.ReadFile("web/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := string(sourceBytes)
+	source := webJavaScript(t)
 	for _, feature := range []string{
 		"function hideTooltip()",
 		"tooltip.dataset.nasPhotoTooltip = 'true'",
@@ -887,11 +829,7 @@ func TestValidRootsPreservingKeepsExistingIDs(t *testing.T) {
 }
 
 func TestDialogLifecycleSeparatesOpenFromRender(t *testing.T) {
-	sourceBytes, err := assets.ReadFile("web/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := string(sourceBytes)
+	source := webJavaScript(t)
 	for _, feature := range []string{
 		"function createMaterialDialogShell(",
 		"function renderMaterialDialog(",
@@ -918,11 +856,7 @@ func TestDialogLifecycleSeparatesOpenFromRender(t *testing.T) {
 }
 
 func TestDialogInternalNavigationKeepsStableShell(t *testing.T) {
-	sourceBytes, err := assets.ReadFile("web/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := string(sourceBytes)
+	source := webJavaScript(t)
 	for _, feature := range []string{
 		"dialog.innerHTML = `<span slot=\"header\" class=\"dialog-shell-header\"></span>",
 		"content.innerHTML = body;",
@@ -937,11 +871,7 @@ func TestDialogInternalNavigationKeepsStableShell(t *testing.T) {
 }
 
 func TestSettingsStayInsideMaterialDialog(t *testing.T) {
-	sourceBytes, err := assets.ReadFile("web/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := string(sourceBytes)
+	source := webJavaScript(t)
 	for _, feature := range []string{
 		"function openSettingsDialog()",
 		"$('#settings').onclick = openSettingsDialog;",
@@ -963,11 +893,7 @@ func TestSettingsStayInsideMaterialDialog(t *testing.T) {
 }
 
 func TestDialogSingleSelectUsesBeforeInput(t *testing.T) {
-	sourceBytes, err := assets.ReadFile("web/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := string(sourceBytes)
+	source := webJavaScript(t)
 	for _, feature := range []string{
 		"button.onbeforeinput = event => {",
 		"event.preventDefault();",
@@ -981,18 +907,141 @@ func TestDialogSingleSelectUsesBeforeInput(t *testing.T) {
 }
 
 func TestSettingsResetUsesErrorFilledButtonTokens(t *testing.T) {
-	cssBytes, err := assets.ReadFile("web/m3e-overrides.css")
+	cssBytes, err := assets.ReadFile("web/dialogs.css")
 	if err != nil {
 		t.Fatal(err)
 	}
 	css := string(cssBytes)
 	for _, feature := range []string{
 		`.settings-dialog-item.danger {`,
-		`--m3e-filled-button-container-color: var(--md-sys-color-error`,
-		`--m3e-filled-button-label-text-color: var(--md-sys-color-on-error`,
+		`--m3e-filled-button-container-color: var(--nas-color-error`,
+		`--m3e-filled-button-label-text-color: var(--nas-color-on-error`,
 	} {
 		if !strings.Contains(css, feature) {
 			t.Fatalf("settings reset error styling is missing %q", feature)
+		}
+	}
+}
+
+func TestFrontendFeatureOwnershipHasNoOverrideLayer(t *testing.T) {
+	for _, legacy := range []string{"web/app.js", "web/style.css", "web/m3e-overrides.css"} {
+		if _, err := assets.ReadFile(legacy); err == nil {
+			t.Fatalf("legacy layered frontend asset still exists: %s", legacy)
+		}
+	}
+	for _, name := range []string{"web/base.css", "web/shell.css", "web/gallery.css", "web/dialogs.css", "web/viewer.css", "web/upload.css"} {
+		content, err := assets.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(content), "--md-sys-") {
+			t.Fatalf("%s bypasses the NAS-PHOTO semantic theme boundary", name)
+		}
+	}
+	theme, err := assets.ReadFile("web/theme.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, featureSelector := range []string{".gallery", ".tile", ".viewer", ".controls", ".settings-dialog", "#upload-"} {
+		if strings.Contains(string(theme), featureSelector) {
+			t.Fatalf("theme.css owns feature selector %q", featureSelector)
+		}
+	}
+}
+
+func TestFrontendFeatureScriptsBootAfterAllDependencies(t *testing.T) {
+	indexBytes, err := assets.ReadFile("web/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := string(indexBytes)
+	ordered := []string{"core.js", "shell.js", "gallery.js", "dialogs.js", "viewer.js", "settings.js", "upload.js", "runtime.js"}
+	previous := -1
+	for _, name := range ordered {
+		position := strings.Index(index, `src="`+name+`"`)
+		if position < 0 || position <= previous {
+			t.Fatalf("frontend script order is invalid at %s", name)
+		}
+		previous = position
+	}
+	runtime := readWebAssetSet(t, "web/runtime.js")
+	if !strings.Contains(runtime, "boot().catch(") {
+		t.Fatal("runtime.js no longer owns application startup")
+	}
+	for _, name := range ordered[:len(ordered)-1] {
+		content := readWebAssetSet(t, "web/"+name)
+		if strings.Contains(content, "boot().catch(") {
+			t.Fatalf("%s starts the app before all feature scripts are loaded", name)
+		}
+	}
+}
+
+func TestGalleryAndViewerUseDedicatedLifecyclePaths(t *testing.T) {
+	gallery := readWebAssetSet(t, "web/gallery.js")
+	for _, expected := range []string{
+		"function updateGalleryItems(append = false)",
+		"function connectGalleryShell()",
+		"gallery.onclick = event =>",
+		"updateGalleryItems(offset > 0)",
+		"return refreshGalleryItems()",
+	} {
+		if !strings.Contains(gallery, expected) {
+			t.Fatalf("gallery lifecycle is missing %q", expected)
+		}
+	}
+	if strings.Contains(gallery, "tile.onclick = () => openViewerFromTile") {
+		t.Fatal("gallery still rebinds every tile after rendering")
+	}
+	viewer := readWebAssetSet(t, "web/viewer.js")
+	for _, expected := range []string{
+		"function updateViewerPane(surface, paneIndex, retainedPreview = null, preserveControls = false)",
+		"surface.replaceChildren(template.content)",
+		"connectViewerPane(surface, preserveControls)",
+		`<div class="split-surface"></div>`,
+	} {
+		if !strings.Contains(viewer, expected) {
+			t.Fatalf("viewer lifecycle is missing %q", expected)
+		}
+	}
+	if strings.Contains(viewer, "surface.innerHTML = paneHTML") {
+		t.Fatal("viewer still has a second direct render/bind path")
+	}
+}
+
+func TestGalleryViewerMotionIsIndependentFromM3E(t *testing.T) {
+	gallery := readWebAssetSet(t, "web/gallery.css")
+	viewer := readWebAssetSet(t, "web/viewer.css")
+	for name, content := range map[string]string{"gallery": gallery, "viewer": viewer} {
+		if strings.Contains(content, "--md-sys-motion-") || strings.Contains(content, "--nas-motion-") {
+			t.Fatalf("%s motion is coupled to general M3E UI motion", name)
+		}
+	}
+	for _, expected := range []string{
+		"--nas-gallery-tile-effect-motion:",
+		"--nas-gallery-image-reveal-duration: 140ms",
+		"--nas-viewer-controls-fade-motion:",
+		"--nas-gallery-view-transition-duration:",
+	} {
+		if !strings.Contains(gallery+viewer, expected) {
+			t.Fatalf("gallery/viewer motion owner is missing %q", expected)
+		}
+	}
+	javascript := webJavaScript(t)
+	if strings.Contains(javascript, "GALLERY_IMAGE_REVEAL_MS") ||
+		!strings.Contains(javascript, "cssTimeMilliseconds(getComputedStyle(stage).getPropertyValue('--nas-gallery-image-reveal-duration'))") {
+		t.Fatal("viewer image reveal duration has more than one source of truth")
+	}
+}
+
+func TestM3EOwnsAllNonGalleryButtonPaint(t *testing.T) {
+	javascript := webJavaScript(t) + readWebAssetSet(t, "web/upload.js")
+	if strings.Count(javascript, "<button") != 1 || !strings.Contains(javascript, `<button class="tile"`) {
+		t.Fatal("native buttons remain outside the NAS-PHOTO-owned gallery tile")
+	}
+	styles := webStyles(t)
+	for _, legacy := range []string{"button:not(.tile)", ".upload-status-actions button", ".upload-close::before", ".upload-progress-value"} {
+		if strings.Contains(styles, legacy) {
+			t.Fatalf("legacy native component paint remains: %s", legacy)
 		}
 	}
 }

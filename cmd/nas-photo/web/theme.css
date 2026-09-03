@@ -1,0 +1,61 @@
+/* Material 3 theme boundary. Feature CSS consumes only --nas-* semantic tokens. */
+:root {
+  --nas-color-surface: var(--md-sys-color-surface, #0b1020);
+  --nas-color-on-surface: var(--md-sys-color-on-surface, #f8fafc);
+  --nas-color-surface-container: var(--md-sys-color-surface-container, #151d31);
+  --nas-color-surface-container-high: var(--md-sys-color-surface-container-high, #222e46);
+  --nas-color-surface-container-highest: var(--md-sys-color-surface-container-highest, #0b1222);
+  --nas-color-on-surface-variant: var(--md-sys-color-on-surface-variant, #aebbd0);
+  --nas-color-outline: var(--md-sys-color-outline, #68758f);
+  --nas-color-outline-variant: var(--md-sys-color-outline-variant, #34415d);
+  --nas-color-primary: var(--md-sys-color-primary, #72a7ff);
+  --nas-color-on-primary: var(--md-sys-color-on-primary, #101827);
+  --nas-color-primary-container: var(--md-sys-color-primary-container, #18385b);
+  --nas-color-on-primary-container: var(--md-sys-color-on-primary-container, #d8ecff);
+  --nas-color-secondary-container: var(--md-sys-color-secondary-container, #222e46);
+  --nas-color-on-secondary-container: var(--md-sys-color-on-secondary-container, #f8fafc);
+  --nas-color-error: var(--md-sys-color-error, #dc3f4f);
+  --nas-color-on-error: var(--md-sys-color-on-error, #fff);
+  --nas-color-scrim: var(--md-sys-color-scrim, #000);
+  --nas-color-inverse-on-surface: var(--md-sys-color-inverse-on-surface, #fff);
+  --nas-shape-extra-small: var(--md-sys-shape-corner-extra-small, 4px);
+  --nas-shape-medium: var(--md-sys-shape-corner-medium, 12px);
+  --nas-shape-large: var(--md-sys-shape-corner-large, 16px);
+  --nas-shape-extra-large: var(--md-sys-shape-corner-extra-large, 28px);
+  --nas-shape-full: var(--md-sys-shape-corner-full, 999px);
+  --nas-elevation-level0: var(--md-sys-elevation-level0, none);
+  --nas-elevation-level1: var(--md-sys-elevation-level1, 0 1px 3px #0005);
+  --nas-elevation-level3: var(--md-sys-elevation-level3, 0 6px 18px #0006);
+  --nas-elevation-level4: var(--md-sys-elevation-level4, 0 8px 28px #0007);
+  --nas-type-body-large-font: var(--md-sys-typescale-body-large-font, Inter, "Segoe UI", system-ui, sans-serif);
+  --nas-type-title-medium: var(--md-sys-typescale-title-medium, 700 1rem/1.5 system-ui);
+  --nas-type-label-large: var(--md-sys-typescale-label-large, 500 .9rem/1.3 system-ui);
+  --nas-motion-spring-fast-effects: var(--md-sys-motion-spring-fast-effects, 75ms ease-out);
+  --nas-motion-spring-default-effects: var(--md-sys-motion-spring-default-effects, 100ms ease-out);
+}
+
+/* M3E components intentionally run at 2x duration speed. Gallery/Viewer motion does not consume these tokens. */
+:root {
+  --md-sys-motion-duration-short-1: 25ms !important;
+  --md-sys-motion-duration-short-2: 50ms !important;
+  --md-sys-motion-duration-short-3: 75ms !important;
+  --md-sys-motion-duration-short-4: 100ms !important;
+  --md-sys-motion-duration-medium-1: 125ms !important;
+  --md-sys-motion-duration-medium-2: 150ms !important;
+  --md-sys-motion-duration-medium-3: 175ms !important;
+  --md-sys-motion-duration-medium-4: 200ms !important;
+  --md-sys-motion-duration-long-1: 225ms !important;
+  --md-sys-motion-duration-long-2: 250ms !important;
+  --md-sys-motion-duration-long-3: 275ms !important;
+  --md-sys-motion-duration-long-4: 300ms !important;
+  --md-sys-motion-duration-extra-long-1: 350ms !important;
+  --md-sys-motion-duration-extra-long-2: 400ms !important;
+  --md-sys-motion-duration-extra-long-3: 450ms !important;
+  --md-sys-motion-duration-extra-long-4: 500ms !important;
+  --md-sys-motion-spring-fast-spatial: 175ms cubic-bezier(0.42, 1.67, 0.21, 0.90) !important;
+  --md-sys-motion-spring-default-spatial: 250ms cubic-bezier(0.38, 1.21, 0.22, 1.00) !important;
+  --md-sys-motion-spring-slow-spatial: 325ms cubic-bezier(0.39, 1.29, 0.35, 0.98) !important;
+  --md-sys-motion-spring-fast-effects: 75ms cubic-bezier(0.31, 0.94, 0.34, 1.00) !important;
+  --md-sys-motion-spring-default-effects: 100ms cubic-bezier(0.34, 0.80, 0.34, 1.00) !important;
+  --md-sys-motion-spring-slow-effects: 150ms cubic-bezier(0.34, 0.88, 0.34, 1.00) !important;
+}

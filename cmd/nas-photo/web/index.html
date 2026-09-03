@@ -6,9 +6,13 @@
   <meta name="theme-color" content="#111827">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="base.css">
+  <link rel="stylesheet" href="shell.css">
+  <link rel="stylesheet" href="gallery.css">
+  <link rel="stylesheet" href="dialogs.css">
+  <link rel="stylesheet" href="viewer.css">
   <link rel="stylesheet" href="upload.css">
-  <link rel="stylesheet" href="m3e-overrides.css">
   <title>NAS-PHOTO</title>
   <script src="m3e.bundle.js"></script>
 </head>
@@ -17,8 +21,16 @@
     <div id="app"></div>
   </m3e-theme>
   <script src="layout.js"></script>
-  <script src="app.js"></script>
+  <script src="core.js"></script>
+  <script src="shell.js"></script>
+  <script src="gallery.js"></script>
+  <script src="dialogs.js"></script>
+  <script src="viewer.js"></script>
+  <script src="viewer-zoom.js"></script>
+  <script src="viewer-gestures.js"></script>
+  <script src="settings.js"></script>
   <script src="upload.js"></script>
+  <script src="runtime.js"></script>
   <script>if('serviceWorker'in navigator)navigator.serviceWorker.register('/sw.js')</script>
 </body>
 </html>

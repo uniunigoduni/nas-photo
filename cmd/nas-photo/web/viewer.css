@@ -1,0 +1,320 @@
+/* Viewer styles. This file is the sole owner of these selectors. */
+:root {
+  --nas-gallery-view-transition-duration: 250ms;
+  --nas-gallery-view-transition-easing: cubic-bezier(.2, 0, 0, 1);
+}
+
+body.viewer-open {
+  overflow: hidden;
+}
+
+.viewer {
+  --nas-viewer-controls-fade-motion: 100ms cubic-bezier(0.34, 0.80, 0.34, 1);
+  --nas-gallery-image-reveal-duration: 140ms;
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  width: 100vw;
+  height: 100dvh;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  gap: 2px;
+  background: var(--nas-color-scrim, #01040a);
+}
+
+.split-surface {
+  position: relative;
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+}
+
+.split-surface > .pane {
+  width: 100%;
+  height: 100%;
+}
+
+.split-divider {
+  position: relative;
+  z-index: 6;
+  flex: 0 0 3px;
+  background: var(--nas-color-outline-variant, #64748b);
+}
+
+
+.end-split {
+  position: absolute;
+  bottom: max(10px, env(safe-area-inset-bottom));
+  left: 50%;
+  z-index: 7;
+  transform: translateX(-50%);
+}
+
+.split-window {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  border: 0;
+  outline: none;
+  background: var(--nas-color-surface);
+}
+
+.pane {
+  position: relative;
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  outline: none;
+  touch-action: none;
+}
+
+.swipe-track {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  transform: translate3d(-100%, 0, 0);
+  will-change: transform;
+}
+
+.swipe-track.is-dragging {
+  cursor: grabbing;
+}
+
+.swipe-track.is-settling {
+  cursor: grabbing;
+}
+
+.swipe-slide {
+  display: grid;
+  place-items: center;
+  flex: 0 0 100%;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.media {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  min-width: 0;
+  min-height: 0;
+  object-fit: contain;
+  transform-origin: center;
+}
+
+.viewer-image-stage {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.viewer-image-stage > .media {
+  grid-area: 1 / 1;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.viewer-image-placeholder {
+  z-index: 0;
+  pointer-events: none;
+  opacity: 1;
+}
+
+.viewer-image-full {
+  z-index: 1;
+  opacity: 0;
+  transition: opacity var(--nas-gallery-image-reveal-duration) ease-out;
+}
+
+.viewer-image-stage.is-loaded .viewer-image-full {
+  opacity: 1;
+}
+
+.zoomable {
+  cursor: zoom-in;
+  user-select: none;
+  will-change: transform;
+}
+
+.zoomable.is-zoomed {
+  cursor: grab;
+}
+
+.zoomable.is-zoomed:active {
+  cursor: grabbing;
+}
+
+.swipe-preview-wrap {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.swipe-preview {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  object-position: center center;
+  user-select: none;
+}
+
+.swipe-preview-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: color-mix(in srgb, var(--nas-color-scrim, #000) 72%, transparent);
+  color: var(--nas-color-inverse-on-surface, #fff);
+  font-size: 1.35rem;
+}
+
+.controls {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--nas-viewer-controls-fade-motion);
+}
+
+.pane.controls-visible .controls {
+  opacity: 1;
+}
+
+.controls m3e-button {
+  pointer-events: none;
+}
+
+.pane.controls-visible .controls m3e-button {
+  pointer-events: auto;
+}
+
+.close-viewer {
+  top: max(14px, env(safe-area-inset-top));
+  left: max(14px, env(safe-area-inset-left));
+}
+
+.add-pane {
+  top: max(14px, env(safe-area-inset-top));
+  right: max(14px, env(safe-area-inset-right));
+}
+
+.previous {
+  left: max(14px, env(safe-area-inset-left));
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.next {
+  right: max(14px, env(safe-area-inset-right));
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.video-options {
+  position: absolute;
+  bottom: max(18px, env(safe-area-inset-bottom));
+  left: 50%;
+  display: flex;
+  gap: .55rem;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.video-options m3e-button {
+  position: static;
+  --m3e-icon-button-container-color: color-mix(in srgb, var(--nas-color-surface-container-high, #111827) 88%, transparent);
+}
+
+.swipe-preview-play m3e-icon {
+  --m3e-icon-size: 20px;
+}
+
+.controls m3e-icon-button {
+  pointer-events: none;
+}
+
+.pane.controls-visible .controls m3e-icon-button {
+  pointer-events: auto;
+}
+
+.controls > m3e-icon-button {
+  position: absolute;
+  --m3e-icon-button-container-color: color-mix(in srgb, var(--nas-color-surface-container-high, #111827) 88%, transparent);
+}
+
+::view-transition-group(nas-photo-media) {
+  animation-duration: var(--nas-gallery-view-transition-duration);
+  animation-timing-function: var(--nas-gallery-view-transition-easing);
+}
+
+::view-transition-old(nas-photo-media) {
+  height: 100%;
+  object-fit: contain;
+}
+
+::view-transition-new(nas-photo-media) {
+  height: 100%;
+  object-fit: contain;
+}
+
+@media (max-width: 767px) {
+  .add-pane {
+    display: none;
+  }
+  .previous {
+    display: none;
+  }
+  .next {
+    display: none;
+  }
+  .split-divider {
+    display: none;
+  }
+  .split-window {
+    display: none;
+  }
+  .controls {
+    opacity: 1;
+    z-index: 1;
+  }
+  .controls m3e-button {
+    pointer-events: auto;
+    touch-action: manipulation;
+  }
+  .controls m3e-icon-button {
+    pointer-events: auto;
+    touch-action: manipulation;
+  }
+}
