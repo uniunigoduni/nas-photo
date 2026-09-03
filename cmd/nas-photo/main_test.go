@@ -748,9 +748,17 @@ func TestViewerKeepsThumbnailUntilFullImageIsDecoded(t *testing.T) {
 		t.Fatal(err)
 	}
 	styleSource := string(styles)
-	if !strings.Contains(styleSource, ".viewer-image-stage.is-loaded .viewer-image-placeholder") ||
-		!strings.Contains(styleSource, ".viewer-image-stage.is-loaded .viewer-image-full") {
-		t.Fatal("viewer image does not cross-fade from thumbnail to decoded full image")
+	if strings.Contains(styleSource, ".viewer-image-stage.is-loaded .viewer-image-placeholder") {
+		t.Fatal("viewer placeholder fades out while the full image fades in, which can darken the image")
+	}
+	for _, expected := range []string{
+		`--nas-gallery-image-reveal-duration: 140ms`,
+		`transition: opacity var(--nas-gallery-image-reveal-duration) ease-out`,
+		`.viewer-image-stage.is-loaded .viewer-image-full { opacity: 1; }`,
+	} {
+		if !strings.Contains(styleSource, expected) {
+			t.Fatalf("viewer-only image reveal is missing %q", expected)
+		}
 	}
 	sharedMediaStart := strings.Index(styleSource, ".viewer-image-stage > .media {")
 	placeholderStart := strings.Index(styleSource, ".viewer-image-placeholder {")
@@ -767,6 +775,28 @@ func TestViewerKeepsThumbnailUntilFullImageIsDecoded(t *testing.T) {
 		!strings.Contains(source, "function isPointOutsideDisplayedImage(") ||
 		!strings.Contains(source, "const width = rendered.width * zoom.scale") {
 		t.Fatal("zoom bounds do not use the contained image dimensions")
+	}
+}
+
+func TestViewerReusesAdjacentPreviewWithoutDarkGap(t *testing.T) {
+	content, err := assets.ReadFile("web/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(content)
+	for _, expected := range []string{
+		`function takeViewerSwipePreview(paneIndex, delta)`,
+		`preview.remove()`,
+		`function installRetainedViewerPreview(root, preview)`,
+		`placeholder.replaceWith(preview)`,
+		`const retainedPreview = next.kind === 'video' ? null : takeViewerSwipePreview(paneIndex, delta)`,
+		`openViewer(next.id, paneIndex, swipeOffset, swipeVelocity, retainedPreview)`,
+		`image.addEventListener('transitionend', onRevealEnd)`,
+		`setTimeout(removePlaceholder, GALLERY_IMAGE_REVEAL_MS + 100)`,
+	} {
+		if !strings.Contains(source, expected) {
+			t.Fatalf("viewer preview handoff is missing %q", expected)
+		}
 	}
 }
 
@@ -820,7 +850,7 @@ func TestMaterialTooltipDoesNotBreakViewerOpen(t *testing.T) {
 		"function hideTooltip()",
 		"tooltip.dataset.nasPhotoTooltip = 'true'",
 		"document.body.append(tooltip)",
-		"function openViewer(id, paneIndex = 0, swipeOffset = 0, swipeVelocity = 0)",
+		"function openViewer(id, paneIndex = 0, swipeOffset = 0, swipeVelocity = 0, retainedPreview = null)",
 		"hideTooltip();",
 	} {
 		if !strings.Contains(source, feature) {

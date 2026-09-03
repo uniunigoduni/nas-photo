@@ -337,17 +337,19 @@ label { display: grid; gap: .4rem; color: #dbe5f6; }
   height: 100%;
   object-fit: contain;
 }
+.viewer-image-stage {
+  --nas-gallery-image-reveal-duration: 140ms;
+}
 .viewer-image-placeholder {
   z-index: 0;
   pointer-events: none;
-  transition: opacity .07s ease-out;
+  opacity: 1;
 }
 .viewer-image-full {
   z-index: 1;
   opacity: 0;
-  transition: opacity .07s ease-out;
+  transition: opacity var(--nas-gallery-image-reveal-duration) ease-out;
 }
-.viewer-image-stage.is-loaded .viewer-image-placeholder { opacity: 0; }
 .viewer-image-stage.is-loaded .viewer-image-full { opacity: 1; }
 .zoomable {
   cursor: zoom-in;

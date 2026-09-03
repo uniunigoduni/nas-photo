@@ -121,6 +121,7 @@ const DEFAULT_SHORTCUTS = {
 const CONTROL_HIDE_DELAY = 2500;
 const TOUCH_CONTROL_HIDE_DELAY = 5000;
 const MAX_IMAGE_ZOOM = 5;
+const GALLERY_IMAGE_REVEAL_MS = 140;
 const DOUBLE_TAP_IMAGE_ZOOM = 2.5;
 const DOUBLE_TAP_DELAY = 300;
 const DOUBLE_TAP_DISTANCE = 28;
@@ -931,7 +932,31 @@ function leaveViewerWithTransition() {
   });
 }
 
-function openViewer(id, paneIndex = 0, swipeOffset = 0, swipeVelocity = 0) {
+function takeViewerSwipePreview(paneIndex, delta) {
+  const pane = $(`.viewer .pane[data-pane="${paneIndex}"]`);
+  if (!pane) return null;
+  const slide = delta < 0 ? '.swipe-slide-previous' : '.swipe-slide-next';
+  const preview = $(`${slide} .swipe-preview`, pane);
+  if (!preview) return null;
+  preview.remove();
+  return preview;
+}
+
+function installRetainedViewerPreview(root, preview) {
+  if (!preview) return;
+  const placeholder = $('.viewer-image-placeholder', root);
+  if (!placeholder) return;
+  preview.className = 'media viewer-image-placeholder';
+  preview.removeAttribute('data-media-width');
+  preview.removeAttribute('data-media-height');
+  preview.removeAttribute('style');
+  preview.style.transform = placeholder.style.transform;
+  preview.alt = '';
+  preview.draggable = false;
+  placeholder.replaceWith(preview);
+}
+
+function openViewer(id, paneIndex = 0, swipeOffset = 0, swipeVelocity = 0, retainedPreview = null) {
   hideTooltip();
   state.viewer[paneIndex] = id;
   state.activePane = paneIndex;
@@ -946,6 +971,7 @@ function openViewer(id, paneIndex = 0, swipeOffset = 0, swipeVelocity = 0) {
   const surface = $('.viewer .split-surface');
   if (surface && paneIndex === 0) {
     surface.innerHTML = paneHTML(state.viewer[0], 0);
+    installRetainedViewerPreview(surface, retainedPreview);
     bindViewerPane(surface, true);
     return;
   }
@@ -1378,9 +1404,22 @@ function revealFullViewerImage(image) {
   if (!stage || stage.classList.contains('is-loaded')) return;
   const reveal = () => {
     if (!image.isConnected || !image.naturalWidth) return;
-    stage.classList.add('is-loaded');
     const placeholder = $('.viewer-image-placeholder', stage);
-    if (placeholder) setTimeout(() => placeholder.remove(), 110);
+    if (placeholder) {
+      let removed = false;
+      const removePlaceholder = () => {
+        if (removed) return;
+        removed = true;
+        image.removeEventListener('transitionend', onRevealEnd);
+        placeholder.remove();
+      };
+      const onRevealEnd = event => {
+        if (event.target === image && event.propertyName === 'opacity') removePlaceholder();
+      };
+      image.addEventListener('transitionend', onRevealEnd);
+      setTimeout(removePlaceholder, GALLERY_IMAGE_REVEAL_MS + 100);
+    }
+    stage.classList.add('is-loaded');
   };
   if (image.complete && image.naturalWidth) {
     image.decode?.().then(reveal, reveal);
@@ -1845,7 +1884,10 @@ async function move(paneIndex, delta, swipeOffset = 0, swipeVelocity = 0) {
     index = state.items.findIndex(item => item.id === current);
     next = state.items[index + delta];
   }
-  if (next) openViewer(next.id, paneIndex, swipeOffset, swipeVelocity);
+  if (next) {
+    const retainedPreview = next.kind === 'video' ? null : takeViewerSwipePreview(paneIndex, delta);
+    openViewer(next.id, paneIndex, swipeOffset, swipeVelocity, retainedPreview);
+  }
 }
 
 function renderSettingsDialog(dialog, title, body, actions, singleActions = false) {
