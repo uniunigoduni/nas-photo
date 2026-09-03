@@ -229,9 +229,6 @@ m3e-dialog.option-dialog {
   background: transparent;
   color: var(--md-sys-color-on-surface, #fff);
 }
-.viewer-image-placeholder, .viewer-image-full {
-  transition: opacity var(--md-sys-motion-spring-fast-effects, 75ms ease-out);
-}
 .controls {
   transition: opacity var(--md-sys-motion-spring-default-effects, 100ms ease-out);
 }
