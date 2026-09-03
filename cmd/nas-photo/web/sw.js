@@ -1,5 +1,5 @@
-const CACHE='nas-photo-shell-v27';
-const SHELL=['/','/index.html','/style.css','/upload.css','/layout.js','/app.js','/upload.js','/manifest.webmanifest','/icon.svg'];
+const CACHE='nas-photo-shell-v29';
+const SHELL=['/','/index.html','/style.css','/upload.css','/m3e-overrides.css','/m3e.bundle.js','/layout.js','/app.js','/upload.js','/manifest.webmanifest','/icon.svg'];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(SHELL))));
 self.addEventListener('activate',event=>event.waitUntil(
   caches.keys().then(keys=>Promise.all(keys.filter(key=>key!==CACHE).map(key=>caches.delete(key))))

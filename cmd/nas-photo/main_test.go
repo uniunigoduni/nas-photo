@@ -125,7 +125,7 @@ func TestSortMenuSupportsSameDayNameSubSort(t *testing.T) {
 		"subSort: stored.subSort || ''",
 		"subsort: state.subSort",
 		"choice(t('sameDayName'), 'subsort', 'same-day-name'",
-		"!dateSort)",
+		"!isDateSort())",
 		"draft.subSort = button.dataset.value",
 	} {
 		if !strings.Contains(source, feature) {
@@ -143,7 +143,9 @@ func TestSortDialogStagesChangesUntilApply(t *testing.T) {
 	for _, feature := range []string{
 		"function showSortDialog()",
 		"sort: state.sort",
-		"aria-pressed=\"${selected}\"",
+		"toggle ${selected ? 'selected' : ''}",
+		"class=\"sort-choice-grid sort-basis-grid\"",
+		"dialog-shell-actions",
 		"if (!isDateSort()) draft.subSort = ''",
 		"$('#sort-apply', overlay).onclick",
 		"state.sort = draft.sort",
@@ -152,6 +154,126 @@ func TestSortDialogStagesChangesUntilApply(t *testing.T) {
 	} {
 		if !strings.Contains(source, feature) {
 			t.Fatalf("staged sort dialog is missing %q", feature)
+		}
+	}
+	subSortSection := strings.Index(source, `<div class="option-section"><div class="option-legend">${escapeHTML(t('subSort'))}</div>`)
+	orderSection := strings.Index(source, `<div class="option-section"><div class="option-legend">${escapeHTML(t('order'))}</div>`)
+	if subSortSection < 0 || orderSection < 0 || subSortSection > orderSection {
+		t.Fatal("secondary sort must be directly below the primary sort and before order")
+	}
+	if strings.Contains(source, "<m3e-button-group") {
+		t.Fatal("M3E button groups must not own NAS-PHOTO option layout")
+	}
+}
+
+func TestTopOptionDialogsStageChangesUntilSave(t *testing.T) {
+	sourceBytes, err := assets.ReadFile("web/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(sourceBytes)
+	for _, feature := range []string{
+		"function optionDialog(title, sections, initialValues, onSave)",
+		"const draft = {...initialValues}",
+		"draft[button.dataset.group] = button.dataset.value",
+		"id=\"option-close\"",
+		"id=\"option-save\"",
+		"await onSave(values)",
+		"[t('display'), 'layout'",
+		"[t('mediaType'), 'filter'",
+	} {
+		if !strings.Contains(source, feature) {
+			t.Fatalf("staged top option dialog is missing %q", feature)
+		}
+	}
+}
+
+func TestScanDialogRunsActionsImmediately(t *testing.T) {
+	sourceBytes, err := assets.ReadFile("web/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(sourceBytes)
+	for _, feature := range []string{
+		"$('#scan-menu').onclick = () => actionDialog(t('rescan')",
+		"function actionDialog(title, sections, onSelect)",
+		"closeMaterialDialog(overlay);",
+		"await onSelect(value);",
+	} {
+		if !strings.Contains(source, feature) {
+			t.Fatalf("immediate scan dialog is missing %q", feature)
+		}
+	}
+}
+
+func TestMaterialExpressiveShellIsBundledLocally(t *testing.T) {
+	indexBytes, err := assets.ReadFile("web/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := string(indexBytes)
+	for _, feature := range []string{
+		"m3e.bundle.js",
+		"m3e-overrides.css",
+		"<m3e-theme color=\"#72a7ff\" variant=\"neutral\" scheme=\"dark\" motion=\"expressive\" strong-focus>",
+	} {
+		if !strings.Contains(index, feature) {
+			t.Fatalf("M3E shell is missing %q", feature)
+		}
+	}
+	bundle, err := assets.ReadFile("web/m3e.bundle.js")
+	if err != nil || len(bundle) < 1000 {
+		t.Fatalf("local M3E bundle missing or unexpectedly small: bytes=%d err=%v", len(bundle), err)
+	}
+}
+
+func TestGalleryHeaderShowsTitleIconsAndSettings(t *testing.T) {
+	sourceBytes, err := assets.ReadFile("web/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(sourceBytes)
+	for _, feature := range []string{
+		`<strong class="top-title">NAS-PHOTO</strong>`,
+		`<div class="top top-actions" aria-label="NAS-PHOTO"`,
+		`<m3e-icon slot="icon" name="sort"></m3e-icon>`,
+		`<m3e-icon slot="icon" name="grid_view"></m3e-icon>`,
+		`<m3e-icon slot="icon" name="filter_alt"></m3e-icon>`,
+		`<m3e-icon slot="icon" name="sync"></m3e-icon>`,
+		`id="settings"`,
+		`<m3e-icon name="settings"></m3e-icon>`,
+	} {
+		if !strings.Contains(source, feature) {
+			t.Fatalf("gallery header is missing %q", feature)
+		}
+	}
+	if strings.Contains(source, `<m3e-toolbar class="top"`) {
+		t.Fatal("header actions must not use m3e-toolbar because its paint layer can cover adjacent title/settings controls")
+	}
+}
+
+func TestExpressiveMotionRunsDoubleSpeedWithoutOSMotionPreference(t *testing.T) {
+	for _, name := range []string{"web/app.js", "web/style.css", "web/m3e-overrides.css", "web/m3e.bundle.js"} {
+		content, err := assets.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(content), "prefers-reduced-motion") {
+			t.Fatalf("%s still depends on the OS reduced-motion preference", name)
+		}
+	}
+	overrides, err := assets.ReadFile("web/m3e-overrides.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, token := range []string{
+		"--md-sys-motion-spring-fast-spatial: 175ms cubic-bezier(0.42, 1.67, 0.21, 0.90)",
+		"--md-sys-motion-spring-default-spatial: 250ms cubic-bezier(0.38, 1.21, 0.22, 1.00)",
+		"--md-sys-motion-spring-slow-spatial: 325ms cubic-bezier(0.39, 1.29, 0.35, 0.98)",
+		"--md-sys-motion-duration-long-2: 250ms",
+	} {
+		if !strings.Contains(string(overrides), token) {
+			t.Fatalf("2x motion override is missing %q", token)
 		}
 	}
 }
@@ -499,10 +621,16 @@ func TestViewerSwipeFollowsPointerAndSettles(t *testing.T) {
 	source := string(content)
 	for _, expected := range []string{
 		`class="swipe-track"`,
+		`const GESTURE_AXIS_HYSTERESIS = 10`,
+		`const GESTURE_VELOCITY_SAMPLE_MS = 50`,
+		`function projectGestureVelocity(`,
+		`function startGestureSpring(`,
 		`pane.addEventListener('pointermove'`,
+		`requestAnimationFrame(paintPending)`,
 		`translate3d(calc(-100% + ${offset}px), 0, 0)`,
-		`const fastSwipe =`,
-		`move(index, direction, displayedOffset + direction * pane.clientWidth)`,
+		`const projectedOffset = displayedOffset + projectGestureVelocity(releaseVelocity.x)`,
+		`const distanceThreshold = clampValue(pane.clientWidth * 0.2, 50, 225)`,
+		`move(index, direction, displayedOffset + direction * pane.clientWidth, releaseVelocity.x)`,
 		`displayedOffset = readOffset()`,
 		`pane.addEventListener('pointerdown', clearViewerClickSuppression, true)`,
 		`isPointOutsideDisplayedImage(pane, image, state.zoom[index], event.clientX, event.clientY)`,
@@ -515,8 +643,12 @@ func TestViewerSwipeFollowsPointerAndSettles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(styles), ".swipe-track.is-settling") {
-		t.Fatal("viewer swipe does not animate to its settled position")
+	styleSource := string(styles)
+	if !strings.Contains(styleSource, ".swipe-track.is-dragging, .swipe-track.is-settling") {
+		t.Fatal("viewer swipe does not expose drag/settle state")
+	}
+	if strings.Contains(styleSource, ".swipe-track.is-settling {\n  transition: transform") {
+		t.Fatal("viewer swipe still uses fixed-duration CSS settling instead of gesture spring physics")
 	}
 	previewStart := strings.Index(source, "function swipePreviewHTML(")
 	bindPaneStart := strings.Index(source, "function bindPane(")
@@ -524,22 +656,26 @@ func TestViewerSwipeFollowsPointerAndSettles(t *testing.T) {
 		t.Fatal("could not locate viewer swipe preview implementation")
 	}
 	previewSource := source[previewStart:bindPaneStart]
+	for _, expected := range []string{`data-media-width=`, `data-media-height=`, `function containedMediaSize(`, `function fitSwipePreviews(pane)`, `fitSwipePreviews(pane);`} {
+		if !strings.Contains(source, expected) {
+			t.Fatalf("adjacent preview does not reuse viewer contain sizing: missing %q", expected)
+		}
+	}
 	if !strings.Contains(source, "return `/api/media/${item.id}/thumbnail") ||
 		!strings.Contains(previewSource, `const source = mediaThumbnailURL(item)`) ||
 		strings.Contains(previewSource, `/content`) {
 		t.Fatal("adjacent swipe previews still load full-resolution image content")
 	}
-	styleSource := string(styles)
 	previewStyleStart := strings.Index(styleSource, ".swipe-preview {")
 	previewPlayStart := strings.Index(styleSource, ".swipe-preview-play {")
 	if previewStyleStart < 0 || previewPlayStart <= previewStyleStart {
 		t.Fatal("could not locate adjacent swipe preview sizing")
 	}
 	previewStyle := styleSource[previewStyleStart:previewPlayStart]
-	if !strings.Contains(previewStyle, "width: 100%") ||
-		!strings.Contains(previewStyle, "height: 100%") ||
-		!strings.Contains(previewStyle, "object-fit: contain") {
-		t.Fatal("adjacent swipe preview does not fill the viewer with contain sizing")
+	for _, expected := range []string{"width: auto", "height: auto", "max-width: 100%", "max-height: 100%", "object-fit: contain", "object-position: center center"} {
+		if !strings.Contains(previewStyle, expected) {
+			t.Fatalf("adjacent swipe preview sizing is missing %q", expected)
+		}
 	}
 }
 
@@ -551,11 +687,17 @@ func TestViewerZoomUsesGestureLocationAndSupportsPanning(t *testing.T) {
 	source := string(content)
 	for _, expected := range []string{
 		`const DOUBLE_TAP_IMAGE_ZOOM = 2.5`,
+		`const GESTURE_LOWER_ZOOM_FRICTION = 0.15`,
+		`const GESTURE_UPPER_ZOOM_FRICTION = 0.05`,
 		`function toggleImageZoomAt(`,
+		`function animateImageZoomTo(`,
 		`x: clientX - centerX - (clientX - centerX - current.x) * ratio`,
 		`mode = 'pinch'`,
-		`mode = 'pan'`,
-		`settleImageZoom(pane, image, index)`,
+		`mode = canSwipeFromZoomEdge ? 'swipe' : 'pan'`,
+		`queueZoom({`,
+		`settleImageZoom(pane, image, index, true, releaseVelocity)`,
+		`panStart.x >= bounds.x - 0.5`,
+		`panStart.x <= -bounds.x + 0.5`,
 		`function suppressNextViewerClick()`,
 		`requestAnimationFrame(constrainVisibleViewerZoom)`,
 	} {
@@ -660,5 +802,161 @@ func TestMakeImageThumbnail(t *testing.T) {
 	}
 	if config.Width != 480 || config.Height != 240 {
 		t.Fatalf("unexpected thumbnail size: %dx%d", config.Width, config.Height)
+	}
+}
+func TestMaterialTooltipDoesNotBreakViewerOpen(t *testing.T) {
+	sourceBytes, err := assets.ReadFile("web/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(sourceBytes)
+	for _, feature := range []string{
+		"function hideTooltip()",
+		"tooltip.dataset.nasPhotoTooltip = 'true'",
+		"document.body.append(tooltip)",
+		"function openViewer(id, paneIndex = 0, swipeOffset = 0, swipeVelocity = 0)",
+		"hideTooltip();",
+	} {
+		if !strings.Contains(source, feature) {
+			t.Fatalf("M3E tooltip/viewer integration is missing %q", feature)
+		}
+	}
+}
+
+func TestValidRootsPreservingKeepsExistingIDs(t *testing.T) {
+	base := t.TempDir()
+	first := filepath.Join(base, "first")
+	second := filepath.Join(base, "second")
+	if err := os.MkdirAll(first, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(second, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a := &app{allowed: []string{base}}
+	existing := []Root{{ID: "keep-me", Path: first, Name: "first"}}
+	roots, err := a.validRootsPreserving([]string{first, second}, existing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(roots) != 2 {
+		t.Fatalf("got %d roots, want 2", len(roots))
+	}
+	if roots[0].ID != "keep-me" {
+		t.Fatalf("existing root ID changed to %q", roots[0].ID)
+	}
+	if roots[1].ID == "" || roots[1].ID == "keep-me" {
+		t.Fatalf("new root ID is invalid: %q", roots[1].ID)
+	}
+}
+
+func TestDialogLifecycleSeparatesOpenFromRender(t *testing.T) {
+	sourceBytes, err := assets.ReadFile("web/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(sourceBytes)
+	for _, feature := range []string{
+		"function createMaterialDialogShell(",
+		"function renderMaterialDialog(",
+		"function openMaterialDialog(dialog)",
+		"function openSettingsDialog()",
+		"function renderSettingsHome(dialog)",
+		"$('#settings').onclick = openSettingsDialog;",
+	} {
+		if !strings.Contains(source, feature) {
+			t.Fatalf("dialog lifecycle is missing %q", feature)
+		}
+	}
+	if strings.Contains(source, "function showSettingsHome(dialog = null)") {
+		t.Fatal("settings open and internal navigation must not share the same function")
+	}
+	settingsStart := strings.Index(source, "function renderSettingsHome(dialog)")
+	settingsEnd := strings.Index(source, "let tooltipSerial = 0;")
+	if settingsStart < 0 || settingsEnd <= settingsStart {
+		t.Fatal("settings render section not found")
+	}
+	if strings.Contains(source[settingsStart:settingsEnd], "openMaterialDialog(") {
+		t.Fatal("internal settings navigation must never reopen the dialog")
+	}
+}
+
+func TestDialogInternalNavigationKeepsStableShell(t *testing.T) {
+	sourceBytes, err := assets.ReadFile("web/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(sourceBytes)
+	for _, feature := range []string{
+		"dialog.innerHTML = `<span slot=\"header\" class=\"dialog-shell-header\"></span>",
+		"content.innerHTML = body;",
+		"actionBar.innerHTML = actions;",
+		"candidate.selected = candidate.dataset.language === draft",
+		"candidate.selected = candidate.dataset.value === button.dataset.value",
+	} {
+		if !strings.Contains(source, feature) {
+			t.Fatalf("stable dialog update is missing %q", feature)
+		}
+	}
+}
+
+func TestSettingsStayInsideMaterialDialog(t *testing.T) {
+	sourceBytes, err := assets.ReadFile("web/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(sourceBytes)
+	for _, feature := range []string{
+		"function openSettingsDialog()",
+		"$('#settings').onclick = openSettingsDialog;",
+		"createMaterialDialogShell('option-dialog settings-dialog'",
+		"function renderSettingsDialog(dialog, title, body, actions, singleActions = false)",
+		"renderShortcutSettings(dialog)",
+		"renderRootSettings(dialog)",
+		"renderLanguageSettings(dialog)",
+		"renderResetSettings(dialog)",
+		"function renderResetConfirmation(dialog, password)",
+	} {
+		if !strings.Contains(source, feature) {
+			t.Fatalf("settings dialog flow is missing %q", feature)
+		}
+	}
+	if strings.Contains(source, `<main class="page settings">`) {
+		t.Fatal("settings still replace the gallery with a full-page settings screen")
+	}
+}
+
+func TestDialogSingleSelectUsesBeforeInput(t *testing.T) {
+	sourceBytes, err := assets.ReadFile("web/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(sourceBytes)
+	for _, feature := range []string{
+		"button.onbeforeinput = event => {",
+		"event.preventDefault();",
+		"candidate.selected = candidate.dataset.value === button.dataset.value",
+		"candidate.selected = candidate.dataset.language === draft",
+	} {
+		if !strings.Contains(source, feature) {
+			t.Fatalf("dialog single-select control is missing %q", feature)
+		}
+	}
+}
+
+func TestSettingsResetUsesErrorFilledButtonTokens(t *testing.T) {
+	cssBytes, err := assets.ReadFile("web/m3e-overrides.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(cssBytes)
+	for _, feature := range []string{
+		`.settings-dialog-item.danger {`,
+		`--m3e-filled-button-container-color: var(--md-sys-color-error`,
+		`--m3e-filled-button-label-text-color: var(--md-sys-color-on-error`,
+	} {
+		if !strings.Contains(css, feature) {
+			t.Fatalf("settings reset error styling is missing %q", feature)
+		}
 	}
 }

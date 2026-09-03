@@ -87,14 +87,14 @@
       panel.innerHTML = `
         <div class="upload-status-head">
           <strong class="upload-status-title"></strong>
-          <button type="button" class="upload-close" aria-label="Close">×</button>
+          <m3e-icon-button variant="standard" size="small" class="upload-close" aria-label="Close"><m3e-icon name="close"></m3e-icon></m3e-icon-button>
         </div>
         <div class="upload-status-message"></div>
         <div class="upload-status-detail"></div>
-        <div class="upload-progress" aria-hidden="true"><div class="upload-progress-value"></div></div>
+        <m3e-linear-progress-indicator class="upload-progress" variant="wavy" mode="determinate" max="1" value="0" aria-label="Upload progress"></m3e-linear-progress-indicator>
         <div class="upload-status-actions">
-          <button type="button" class="upload-retry"></button>
-          <button type="button" class="upload-discard"></button>
+          <m3e-button variant="tonal" size="small" class="upload-retry"></m3e-button>
+          <m3e-button variant="text" size="small" class="upload-discard"></m3e-button>
         </div>`;
       document.body.append(panel);
       $('.upload-close', panel).onclick = () => {
@@ -139,7 +139,9 @@
   function setProgress(value) {
     ensureUI();
     const normalized = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
-    $('.upload-progress-value', panel).style.width = `${normalized * 100}%`;
+    const progress = $('.upload-progress', panel);
+    progress.max = 1;
+    progress.value = normalized;
   }
 
   function formatBytes(bytes) {

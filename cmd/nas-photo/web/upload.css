@@ -122,7 +122,7 @@
   height: 100%;
   border-radius: inherit;
   background: currentColor;
-  transition: width .14s ease-out;
+  transition: width .07s ease-out;
 }
 
 .upload-status-actions {

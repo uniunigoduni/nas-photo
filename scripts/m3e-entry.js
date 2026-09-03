@@ -1,0 +1,24 @@
+import '@m3e/web/theme';
+import '@m3e/web/button';
+import '@m3e/web/icon';
+import '@m3e/web/icon-button';
+import '@m3e/web/dialog';
+import '@m3e/web/toolbar';
+import '@m3e/web/progress-indicator';
+import '@m3e/web/tooltip';
+
+import '@m3e/icons/outlined/add';
+import '@m3e/icons/outlined/arrow_back';
+import '@m3e/icons/outlined/arrow_forward';
+import '@m3e/icons/outlined/close';
+import '@m3e/icons/outlined/delete';
+import '@m3e/icons/outlined/filter_alt';
+import '@m3e/icons/outlined/folder';
+import '@m3e/icons/outlined/grid_view';
+import '@m3e/icons/outlined/keyboard_arrow_up';
+import '@m3e/icons/outlined/play_arrow';
+import '@m3e/icons/outlined/repeat';
+import '@m3e/icons/outlined/settings';
+import '@m3e/icons/outlined/sort';
+import '@m3e/icons/outlined/sync';
+import '@m3e/icons/outlined/volume_off';

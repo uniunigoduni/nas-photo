@@ -263,6 +263,7 @@ func (a *app) routes(m *http.ServeMux) {
 	m.HandleFunc("/api/thumbnails/cleanup", a.cleanupThumbnailsAPI)
 	m.HandleFunc("/api/settings", a.settings)
 	m.HandleFunc("/api/settings/shortcuts", a.shortcuts)
+	m.HandleFunc("/api/settings/roots", a.settingsRoots)
 	m.HandleFunc("/api/settings/reset", a.reset)
 	a.uploadRoutes(m)
 	sub, _ := fs.Sub(assets, "web")
@@ -444,6 +445,23 @@ func (a *app) validRoots(paths []string) ([]Root, error) {
 	}
 	return out, nil
 }
+func (a *app) validRootsPreserving(paths []string, existing []Root) ([]Root, error) {
+	roots, err := a.validRoots(paths)
+	if err != nil {
+		return nil, err
+	}
+	byPath := map[string]Root{}
+	for _, root := range existing {
+		byPath[filepath.Clean(root.Path)] = root
+	}
+	for i := range roots {
+		if old, ok := byPath[filepath.Clean(roots[i].Path)]; ok {
+			roots[i].ID = old.ID
+		}
+	}
+	return roots, nil
+}
+
 func id() string { b := make([]byte, 12); rand.Read(b); return base64.RawURLEncoding.EncodeToString(b) }
 func (a *app) browse(w http.ResponseWriter, r *http.Request) {
 	// The first-run screen needs this endpoint before a session exists. Once a
@@ -1366,6 +1384,44 @@ func (a *app) settings(w http.ResponseWriter, r *http.Request) {
 	a.st.mu.RLock()
 	defer a.st.mu.RUnlock()
 	jsonOut(w, map[string]any{"shortcuts": a.st.Shortcuts, "roots": append([]Root{}, a.st.Roots...)})
+}
+
+func (a *app) settingsRoots(w http.ResponseWriter, r *http.Request) {
+	if !a.authed(w, r) {
+		return
+	}
+	if r.Method != http.MethodPatch {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var payload struct {
+		Paths []string `json:"paths"`
+	}
+	if body(r, &payload) != nil {
+		http.Error(w, "入力を読み取れませんでした。", http.StatusBadRequest)
+		return
+	}
+	a.st.mu.RLock()
+	existing := append([]Root(nil), a.st.Roots...)
+	a.st.mu.RUnlock()
+	roots, err := a.validRootsPreserving(payload.Paths, existing)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	a.st.mu.Lock()
+	a.st.Roots = roots
+	err = a.st.save()
+	if err != nil {
+		a.st.Roots = existing
+	}
+	a.st.mu.Unlock()
+	if err != nil {
+		http.Error(w, "設定を保存できませんでした。", http.StatusInternalServerError)
+		return
+	}
+	go a.rescan(context.Background())
+	jsonOut(w, roots)
 }
 
 func (a *app) shortcuts(w http.ResponseWriter, r *http.Request) {

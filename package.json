@@ -1,0 +1,14 @@
+{
+  "name": "nas-photo-web",
+  "private": true,
+  "scripts": {
+    "build:web": "node scripts/build-m3e.mjs"
+  },
+  "dependencies": {
+    "@m3e/icons": "1.0.14",
+    "@m3e/web": "2.7.9"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

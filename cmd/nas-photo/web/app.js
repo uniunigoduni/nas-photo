@@ -124,6 +124,15 @@ const MAX_IMAGE_ZOOM = 5;
 const DOUBLE_TAP_IMAGE_ZOOM = 2.5;
 const DOUBLE_TAP_DELAY = 300;
 const DOUBLE_TAP_DISTANCE = 28;
+const GESTURE_AXIS_HYSTERESIS = 10;
+const GESTURE_VELOCITY_SAMPLE_MS = 50;
+const GESTURE_MIN_SWIPE_SPEED = 0.5;
+const GESTURE_END_FRICTION = 0.35;
+const GESTURE_LOWER_ZOOM_FRICTION = 0.15;
+const GESTURE_UPPER_ZOOM_FRICTION = 0.05;
+const GESTURE_SWIPE_SPRING_FREQUENCY = 30;
+const GESTURE_PAN_SPRING_FREQUENCY = 12;
+const GESTURE_ZOOM_SPRING_FREQUENCY = 40;
 
 const stored = JSON.parse(localStorage.getItem('nas-photo-preferences') || '{}');
 const state = {
@@ -155,8 +164,11 @@ const state = {
   controlsTimer: null,
   controlsHideAt: 0,
   viewerScrollY: 0,
+  viewerTransitionSourceId: null,
   zoom: [{scale:1, x:0, y:0}, {scale:1, x:0, y:0}],
+  zoomAnimationCancel: [null, null],
   swipeOffset: [0, 0],
+  swipeVelocity: [0, 0],
   viewerClickSuppressUntil: 0
 };
 document.documentElement.lang = state.language;
@@ -235,8 +247,8 @@ function showPasswordSetup() {
   app.innerHTML = `<main class="page"><section class="card auth-card">
     <div class="language-picker" aria-label="${t('language')}">
       <span>${t('language')}</span>
-      <button type="button" class="${state.language === 'en' ? '' : 'secondary'}" data-language="en" aria-pressed="${state.language === 'en'}">English</button>
-      <button type="button" class="${state.language === 'ja' ? '' : 'secondary'}" data-language="ja" aria-pressed="${state.language === 'ja'}">日本語</button>
+      <m3e-button type="button" variant="tonal" toggle ${state.language === 'en' ? 'selected' : ''} data-language="en">English</m3e-button>
+      <m3e-button type="button" variant="tonal" toggle ${state.language === 'ja' ? 'selected' : ''} data-language="ja">日本語</m3e-button>
     </div>
     <h1>${t('setupTitle')}</h1>
     <p>${t('setupIntro')}</p>
@@ -244,7 +256,7 @@ function showPasswordSetup() {
       <label>${t('password')}<input id="password" type="password" autocomplete="new-password" autofocus></label>
       <label>${t('confirmPassword')}<input id="confirm" type="password" autocomplete="new-password"></label>
       <p class="hint">${t('passwordHint')}</p>
-      <button>${t('continue')}</button><p class="error" role="alert"></p>
+      <m3e-button variant="filled" type="submit">${t('continue')}</m3e-button><p class="error" role="alert"></p>
     </form></section></main>`;
   $$('[data-language]').forEach(button => button.onclick = () => {
     setLanguage(button.dataset.language);
@@ -274,8 +286,8 @@ async function showFolderSetup() {
       <h1>${t('foldersTitle')}</h1>
       <p>${t('foldersIntro')}</p>
       <div class="root-list">${roots.length ? roots.map(rootRow).join('') : `<p class="empty">${t('notSelected')}</p>`}</div>
-      <div class="stack"><button class="secondary" id="add-root">＋ ${t('chooseFolder')}</button>
-      <button id="finish-folders" ${roots.length ? '' : 'disabled'}>${t('continue')}</button>
+      <div class="stack"><m3e-button variant="tonal" id="add-root"><m3e-icon slot="icon" name="folder"></m3e-icon>${t('chooseFolder')}</m3e-button>
+      <m3e-button variant="filled" id="finish-folders" ${roots.length ? '' : 'disabled'}>${t('continue')}</m3e-button>
       <p class="error" role="alert"></p></div></section></main>`;
     $$('.delete-root').forEach(button => button.onclick = async () => {
       try {
@@ -303,48 +315,40 @@ async function showFolderSetup() {
 
 function rootRow(root) {
   return `<div class="root"><code title="${escapeHTML(root.path)}">${escapeHTML(root.path)}</code>
-    <button class="danger delete-root" data-id="${root.id}">${t('delete')}</button></div>`;
+    <m3e-button variant="filled" class="danger delete-root" data-id="${root.id}"><m3e-icon slot="icon" name="delete"></m3e-icon>${t('delete')}</m3e-button></div>`;
 }
 
 async function chooseFolder(start, onChoose) {
   let path = start;
-  const dialog = document.createElement('div');
-  dialog.className = 'dialog';
-  dialog.innerHTML = `<section class="card"><p>${t('loadingFolders')}</p></section>`;
-  document.body.append(dialog);
+  const dialog = createMaterialDialogShell('option-dialog folder-dialog', t('folderTitle'));
   const render = async () => {
     try {
       const result = await api(`/api/folders/browse${path ? `?path=${encodeURIComponent(path)}` : ''}`);
       const folders = result.folders || [];
-      dialog.innerHTML = `<section class="card folder-dialog" role="dialog" aria-modal="true">
-        <h2>${t('folderTitle')}</h2><p class="chosen">${escapeHTML(result.path || t('selectDrive'))}</p>
+      renderMaterialDialog(dialog, t('folderTitle'), `
+        <p class="chosen">${escapeHTML(result.path || t('selectDrive'))}</p>
         <div class="folder-actions">
-          <button id="choose-current" ${result.path ? '' : 'disabled'}>${t('selectThisFolder')}</button>
-          ${result.parent ? `<button class="secondary" id="folder-up">↑ ${t('parentFolder')}</button>` : ''}
+          <m3e-button variant="filled" id="choose-current" ${result.path ? '' : 'disabled'}>${t('selectThisFolder')}</m3e-button>
+          ${result.parent ? `<m3e-button variant="tonal" id="folder-up"><m3e-icon slot="icon" name="keyboard_arrow_up"></m3e-icon>${t('parentFolder')}</m3e-button>` : ''}
         </div>
         <div class="folder-list">${folders.map(folder => {
           const label = folder.split(/[\\/]/).filter(Boolean).pop() || folder;
-          return `<button data-folder="${escapeHTML(folder)}">📁 ${escapeHTML(label)}</button>`;
-        }).join('') || `<p class="empty">${t('noChildren')}</p>`}</div>
-        <button class="secondary" id="folder-cancel">${t('cancel')}</button></section>`;
-      $('#choose-current', dialog)?.addEventListener('click', async () => {
-        await onChoose(result.path);
-        dialog.remove();
-      });
+          return `<m3e-button variant="tonal" data-folder="${escapeHTML(folder)}"><m3e-icon slot="icon" name="folder"></m3e-icon>${escapeHTML(label)}</m3e-button>`;
+        }).join('') || `<p class="empty">${t('noChildren')}</p>`}</div>`,
+        `<m3e-button variant="text" id="folder-cancel">${t('cancel')}</m3e-button>`,
+        {singleActions: true});
+      $('#choose-current', dialog)?.addEventListener('click', async () => { await onChoose(result.path); closeMaterialDialog(dialog); });
       $('#folder-up', dialog)?.addEventListener('click', () => { path = result.parent; render(); });
-      $$('[data-folder]', dialog).forEach(button => button.onclick = () => {
-        path = button.dataset.folder;
-        render();
-      });
-      $('#folder-cancel', dialog).onclick = () => dialog.remove();
+      $$('[data-folder]', dialog).forEach(button => button.onclick = () => { path = button.dataset.folder; render(); });
+      $('#folder-cancel', dialog).onclick = () => closeMaterialDialog(dialog);
     } catch (reason) {
-      dialog.innerHTML = `<section class="card"><p class="error">${escapeHTML(reason.message)}</p>
-        <button id="folder-cancel">${t('close')}</button></section>`;
-      $('#folder-cancel', dialog).onclick = () => dialog.remove();
+      renderMaterialDialog(dialog, t('folderTitle'), `<p class="error">${escapeHTML(reason.message)}</p>`,
+        `<m3e-button variant="text" id="folder-cancel">${t('close')}</m3e-button>`, {singleActions: true});
+      $('#folder-cancel', dialog).onclick = () => closeMaterialDialog(dialog);
     }
   };
-  dialog.addEventListener('click', event => { if (event.target === dialog) dialog.remove(); });
   await render();
+  openMaterialDialog(dialog);
 }
 
 function showLogin(foldersRequired = false, notice = '') {
@@ -354,7 +358,7 @@ function showLogin(foldersRequired = false, notice = '') {
     ${foldersRequired ? `<p>${t('foldersResume')}</p>` : ''}
     <form class="stack" id="login-form">
       <label>${t('password')}<input id="login-password" type="password" autocomplete="current-password" autofocus></label>
-      <button>${t('continue')}</button><p class="error" role="alert"></p>
+      <m3e-button variant="filled" type="submit">${t('continue')}</m3e-button><p class="error" role="alert"></p>
     </form></section></main>`;
   $('#login-form').onsubmit = async event => {
     event.preventDefault();
@@ -389,16 +393,18 @@ async function showGallery() {
   state.items = [];
   state.nextOffset = 0;
   state.pageLoadRequest = null;
-  app.innerHTML = `<div class="progress" hidden><i></i></div>
+  app.innerHTML = `<m3e-linear-progress-indicator class="progress" variant="wavy" mode="indeterminate" aria-label="${t('loading')}" hidden></m3e-linear-progress-indicator>
     <p class="notice job-status" id="job-status" hidden></p>
-    <header class="top">
-      <strong>NAS-PHOTO</strong>
-      <button class="secondary" id="sort-menu" data-tooltip="${t('sortTip')}">${t('sort')}</button>
-      <button class="secondary" id="view-menu" data-tooltip="${t('viewTip')}">${t('view')}</button>
-      <button class="secondary" id="filter-menu" data-tooltip="${t('filterTip')}">${t('filter')}</button>
-      <button class="secondary" id="scan-menu" data-tooltip="${t('rescanTip')}">${t('rescan')}</button>
-      <span class="spacer"></span><button class="secondary icon-button" id="settings" aria-label="${t('settings')}" data-tooltip="${t('settingsTip')}">⚙</button>
-    </header>
+    <header class="top-shell"><div class="top-layout">
+      <strong class="top-title">NAS-PHOTO</strong>
+      <div class="top top-actions" aria-label="NAS-PHOTO">
+        <m3e-button variant="tonal" size="small" id="sort-menu" data-tooltip="${t('sortTip')}"><m3e-icon slot="icon" name="sort"></m3e-icon>${t('sort')}</m3e-button>
+        <m3e-button variant="tonal" size="small" id="view-menu" data-tooltip="${t('viewTip')}"><m3e-icon slot="icon" name="grid_view"></m3e-icon>${t('view')}</m3e-button>
+        <m3e-button variant="tonal" size="small" id="filter-menu" data-tooltip="${t('filterTip')}"><m3e-icon slot="icon" name="filter_alt"></m3e-icon>${t('filter')}</m3e-button>
+        <m3e-button variant="tonal" size="small" id="scan-menu" data-tooltip="${t('rescanTip')}"><m3e-icon slot="icon" name="sync"></m3e-icon>${t('rescan')}</m3e-button>
+      </div>
+      <m3e-icon-button variant="tonal" size="small" id="settings" aria-label="${t('settings')}" data-tooltip="${t('settingsTip')}"><m3e-icon name="settings"></m3e-icon></m3e-icon-button>
+    </div></header>
     <div class="selection-summary" id="selection-summary"></div>
     <main class="gallery ${state.layout} size-${state.size}" id="gallery"><p class="empty">${t('loading')}</p></main>`;
   bindGalleryControls();
@@ -480,7 +486,7 @@ function renderTiles(append = false) {
   } else {
     gallery.innerHTML = state.items.map(tileHTML).join('');
   }
-  $$('.tile', gallery).forEach(tile => tile.onclick = () => openViewer(tile.dataset.id, 0));
+  $$('.tile', gallery).forEach(tile => tile.onclick = () => openViewerFromTile(tile));
   bindGalleryThumbnails(gallery);
   if (state.layout === 'river') {
     scheduleRiverLayout();
@@ -514,7 +520,7 @@ function tileHTML(item) {
   return `<button class="tile" data-id="${item.id}" data-kind="${item.kind}" data-aspect-ratio="${knownRatio}" aria-label="${escapeHTML(item.name)}" data-tooltip="${t('mediaTip')}">
     <span class="thumb-fallback"></span>
     <img src="${thumb}" loading="lazy" decoding="async" alt="">
-    ${item.kind === 'video' ? '<span class="play-mark" aria-hidden="true">▶</span>' : ''}
+    ${item.kind === 'video' ? '<span class="play-mark" aria-hidden="true"><m3e-icon name="play_arrow"></m3e-icon></span>' : ''}
   </button>`;
 }
 
@@ -580,16 +586,22 @@ function layoutRiverGallery() {
 function bindGalleryControls() {
   $('#sort-menu').onclick = showSortDialog;
   $('#view-menu').onclick = () => optionDialog(t('view'), [
-    [t('display'), [[t('square'), 'square'], [t('river'), 'river']]],
-    [t('size'), [[t('small'), 'small'], [t('medium'), 'medium'], [t('large'), 'large']]]
-  ], value => {
-    if (value === 'square' || value === 'river') state.layout = value; else state.size = value;
-    savePreferences(); showGallery();
+    [t('display'), 'layout', [[t('square'), 'square'], [t('river'), 'river']]],
+    [t('size'), 'size', [[t('small'), 'small'], [t('medium'), 'medium'], [t('large'), 'large']]]
+  ], {layout: state.layout, size: state.size}, draft => {
+    state.layout = draft.layout;
+    state.size = draft.size;
+    savePreferences();
+    showGallery();
   });
   $('#filter-menu').onclick = () => optionDialog(t('filter'), [
-    [t('mediaType'), [[t('all'), ''], [t('images'), 'image'], [t('videos'), 'video']]]
-  ], value => { state.filter = value; savePreferences(); showGallery(); });
-  $('#scan-menu').onclick = () => optionDialog(t('rescan'), [
+    [t('mediaType'), 'filter', [[t('all'), ''], [t('images'), 'image'], [t('videos'), 'video']]]
+  ], {filter: state.filter}, draft => {
+    state.filter = draft.filter;
+    savePreferences();
+    showGallery();
+  });
+  $('#scan-menu').onclick = () => actionDialog(t('rescan'), [
     [t('index'), [[t('rescanNow'), 'scan']]],
     [t('thumbnails'), [
       [t('generateThumbnails'), 'thumbnails'],
@@ -621,93 +633,157 @@ function bindGalleryControls() {
       status.textContent = reason.message;
     }
   });
-  $('#settings').onclick = showSettingsHome;
+  $('#settings').onclick = openSettingsDialog;
+}
+
+function closeMaterialDialog(dialog) {
+  if (!dialog) return;
+  if (dialog.open) dialog.open = false;
+  else dialog.remove();
+}
+
+function createMaterialDialogShell(className = 'option-dialog', title = '') {
+  const dialog = document.createElement('m3e-dialog');
+  dialog.className = className;
+  dialog.innerHTML = `<span slot="header" class="dialog-shell-header"></span>
+    <div class="dialog-shell-content"></div>
+    <div slot="actions" class="dialog-actions dialog-shell-actions"></div>`;
+  if (title) dialog.setAttribute('aria-label', title);
+  return dialog;
+}
+
+function renderMaterialDialog(dialog, title, body, actions, options = {}) {
+  const header = dialog.querySelector(':scope > .dialog-shell-header');
+  const content = dialog.querySelector(':scope > .dialog-shell-content');
+  const actionBar = dialog.querySelector(':scope > .dialog-shell-actions');
+  if (!header || !content || !actionBar) throw new Error('Material dialog shell is incomplete');
+  dialog.setAttribute('aria-label', title);
+  header.textContent = title;
+  content.className = `dialog-shell-content${options.contentClass ? ` ${options.contentClass}` : ''}`;
+  content.innerHTML = body;
+  actionBar.className = `dialog-actions dialog-shell-actions${options.singleActions ? ' dialog-actions-single' : ''}`;
+  actionBar.innerHTML = actions;
+}
+
+function openMaterialDialog(dialog) {
+  if (!dialog || dialog.isConnected) return;
+  dialog.addEventListener('closed', () => dialog.remove(), {once: true});
+  document.body.append(dialog);
+  dialog.open = true;
 }
 
 function showSortDialog() {
-  const overlay = document.createElement('div');
-  overlay.className = 'dialog option-dialog sort-dialog';
-  const draft = {
-    sort: state.sort,
-    order: state.order,
-    subSort: state.subSort,
-    randomSeed: state.randomSeed
-  };
+  const overlay = createMaterialDialogShell('option-dialog sort-dialog', t('sort'));
+  const draft = {sort: state.sort, order: state.order, subSort: state.subSort, randomSeed: state.randomSeed};
   const isDateSort = () => ['captured', 'created', 'modified'].includes(draft.sort);
   const choice = (label, group, value, selected, disabled = false) =>
-    `<button class="secondary option${selected ? ' selected' : ''}" data-group="${group}" data-value="${value}" aria-pressed="${selected}" ${disabled ? 'disabled' : ''}>${escapeHTML(label)}</button>`;
-
-  const render = () => {
-    const dateSort = isDateSort();
-    overlay.innerHTML = `<section class="card" role="dialog" aria-modal="true"><h2>${escapeHTML(t('sort'))}</h2>
-      <fieldset><legend>${escapeHTML(t('sortBasis'))}</legend>
+    `<m3e-button class="sort-choice" variant="tonal" size="small" toggle ${selected ? 'selected' : ''}
+      data-group="${group}" data-value="${escapeHTML(value)}" ${disabled ? 'disabled' : ''}>${escapeHTML(label)}</m3e-button>`;
+  renderMaterialDialog(overlay, t('sort'), `<div class="sort-dialog-sections">
+    <div class="option-section"><div class="option-legend">${escapeHTML(t('sortBasis'))}</div>
+      <div class="sort-choice-grid sort-basis-grid" role="group" aria-label="${escapeHTML(t('sortBasis'))}">
         ${choice(t('captured'), 'sort', 'captured', draft.sort === 'captured')}
         ${choice(t('created'), 'sort', 'created', draft.sort === 'created')}
         ${choice(t('modified'), 'sort', 'modified', draft.sort === 'modified')}
         ${choice(t('name'), 'sort', 'name', draft.sort === 'name')}
         ${choice(t('random'), 'sort', 'random', draft.sort === 'random')}
-      </fieldset>
-      <div class="sort-dialog-lower">
-        <fieldset><legend>${escapeHTML(t('order'))}</legend>
-          ${choice(t('ascending'), 'order', 'asc', draft.order === 'asc')}
-          ${choice(t('descending'), 'order', 'desc', draft.order === 'desc')}
-        </fieldset>
-        <fieldset><legend>${escapeHTML(t('subSort'))}</legend>
-          ${choice(t('noSubSort'), 'subsort', '', draft.subSort === '')}
-          ${choice(t('sameDayName'), 'subsort', 'same-day-name', draft.subSort === 'same-day-name', !dateSort)}
-        </fieldset>
-      </div>
-      <div class="sort-dialog-actions">
-        <button class="secondary" id="sort-cancel">${escapeHTML(t('cancel'))}</button>
-        <button id="sort-apply">${escapeHTML(t('applySort'))}</button>
-      </div></section>`;
+      </div></div>
+    <div class="option-section"><div class="option-legend">${escapeHTML(t('subSort'))}</div>
+      <div class="sort-choice-grid" role="group" aria-label="${escapeHTML(t('subSort'))}">
+        ${choice(t('noSubSort'), 'subsort', '', draft.subSort === '')}
+        ${choice(t('sameDayName'), 'subsort', 'same-day-name', draft.subSort === 'same-day-name', !isDateSort())}
+      </div></div>
 
-    $$('[data-group="sort"]', overlay).forEach(button => button.onclick = () => {
-      const previous = draft.sort;
-      draft.sort = button.dataset.value;
-      if (!isDateSort()) draft.subSort = '';
-      if (draft.sort === 'random' && previous !== 'random') draft.randomSeed = createRandomSeed();
-      render();
+    <div class="option-section"><div class="option-legend">${escapeHTML(t('order'))}</div>
+      <div class="sort-choice-grid" role="group" aria-label="${escapeHTML(t('order'))}">
+        ${choice(t('ascending'), 'order', 'asc', draft.order === 'asc')}
+        ${choice(t('descending'), 'order', 'desc', draft.order === 'desc')}
+      </div></div></div>`, `
+    <m3e-button variant="text" id="sort-cancel">${escapeHTML(t('cancel'))}</m3e-button>
+    <m3e-button variant="filled" id="sort-apply">${escapeHTML(t('applySort'))}</m3e-button>`);
+  const sync = () => {
+    $$('[data-group="sort"]', overlay).forEach(button => button.selected = button.dataset.value === draft.sort);
+    $$('[data-group="order"]', overlay).forEach(button => button.selected = button.dataset.value === draft.order);
+    $$('[data-group="subsort"]', overlay).forEach(button => {
+      button.selected = button.dataset.value === draft.subSort;
+      if (button.dataset.value === 'same-day-name') button.disabled = !isDateSort();
     });
-    $$('[data-group="order"]', overlay).forEach(button => button.onclick = () => {
-      draft.order = button.dataset.value;
-      render();
-    });
-    $$('[data-group="subsort"]', overlay).forEach(button => button.onclick = () => {
-      draft.subSort = button.dataset.value;
-      render();
-    });
-    $('#sort-cancel', overlay).onclick = () => overlay.remove();
-    $('#sort-apply', overlay).onclick = () => {
-      state.sort = draft.sort;
-      state.order = draft.order;
-      state.subSort = draft.subSort;
-      state.randomSeed = draft.randomSeed;
-      savePreferences();
-      overlay.remove();
-      showGallery();
-    };
   };
-
-  overlay.addEventListener('click', event => { if (event.target === overlay) overlay.remove(); });
-  document.body.append(overlay);
-  render();
+  const bindChoice = (selector, updateDraft) => {
+    $$(selector, overlay).forEach(button => button.onbeforeinput = event => {
+      event.preventDefault();
+      updateDraft(button);
+      sync();
+    });
+  };
+  bindChoice('[data-group="sort"]', button => {
+    const previous = draft.sort;
+    draft.sort = button.dataset.value;
+    if (!isDateSort()) draft.subSort = '';
+    if (draft.sort === 'random' && previous !== 'random') draft.randomSeed = createRandomSeed();
+  });
+  bindChoice('[data-group="order"]', button => { draft.order = button.dataset.value; });
+  bindChoice('[data-group="subsort"]', button => { draft.subSort = button.dataset.value; });
+  $('#sort-cancel', overlay).onclick = () => closeMaterialDialog(overlay);
+  $('#sort-apply', overlay).onclick = () => {
+    state.sort = draft.sort;
+    state.order = draft.order;
+    state.subSort = draft.subSort;
+    state.randomSeed = draft.randomSeed;
+    savePreferences();
+    closeMaterialDialog(overlay);
+    showGallery();
+  };
+  openMaterialDialog(overlay);
 }
 
-function optionDialog(title, sections, onSelect) {
-  const overlay = document.createElement('div');
-  overlay.className = 'dialog option-dialog';
-  overlay.innerHTML = `<section class="card" role="dialog" aria-modal="true"><h2>${escapeHTML(title)}</h2>
-    ${sections.map(([label, options]) => `<fieldset><legend>${escapeHTML(label)}</legend>
-      ${options.map(([text, value, disabled = false]) => `<button class="secondary option" data-value="${escapeHTML(value)}" ${disabled ? 'disabled' : ''}>${escapeHTML(text)}</button>`).join('')}
-    </fieldset>`).join('')}<button id="option-close">${t('close')}</button></section>`;
-  document.body.append(overlay);
-  $$('.option', overlay).forEach(button => button.onclick = async () => {
-    overlay.remove();
-    await onSelect(button.dataset.value);
+function optionDialog(title, sections, initialValues, onSave) {
+  const overlay = createMaterialDialogShell('option-dialog', title);
+  const draft = {...initialValues};
+  const choice = (label, group, value, selected, disabled = false) =>
+    `<m3e-button variant="tonal" size="small" class="option" toggle ${selected ? 'selected' : ''}
+      data-group="${escapeHTML(group)}" data-value="${escapeHTML(value)}" ${disabled ? 'disabled' : ''}>${escapeHTML(label)}</m3e-button>`;
+  renderMaterialDialog(overlay, title, `<div class="option-dialog-sections">${sections.map(([label, group, options]) => `<div class="option-section">
+    <div class="option-legend">${escapeHTML(label)}</div>
+
+    <div class="option-choice-grid" role="group" aria-label="${escapeHTML(label)}">
+      ${options.map(([optionText, value, disabled = false]) => choice(optionText, group, value,
+        Object.prototype.hasOwnProperty.call(draft, group) && draft[group] === value, disabled)).join('')}
+    </div></div>`).join('')}</div>`, `
+    <m3e-button variant="text" id="option-close">${escapeHTML(t('close'))}</m3e-button>
+    <m3e-button variant="filled" id="option-save" ${Object.keys(draft).length ? '' : 'disabled'}>${escapeHTML(t('save'))}</m3e-button>`);
+  $$('.option', overlay).forEach(button => button.onbeforeinput = event => {
+    event.preventDefault();
+    draft[button.dataset.group] = button.dataset.value;
+    $$('.option', overlay).forEach(candidate => {
+      if (candidate.dataset.group === button.dataset.group) candidate.selected = candidate.dataset.value === button.dataset.value;
+    });
   });
-  $('#option-close', overlay).onclick = () => overlay.remove();
-  overlay.onclick = event => { if (event.target === overlay) overlay.remove(); };
+  $('#option-close', overlay).onclick = () => closeMaterialDialog(overlay);
+  $('#option-save', overlay).onclick = async () => {
+    const values = {...draft};
+    closeMaterialDialog(overlay);
+    await onSave(values);
+  };
+  openMaterialDialog(overlay);
+}
+
+function actionDialog(title, sections, onSelect) {
+  const overlay = createMaterialDialogShell('option-dialog action-dialog', title);
+  renderMaterialDialog(overlay, title, `<div class="option-dialog-sections">${sections.map(([label, options]) => `<div class="option-section">
+    <div class="option-legend">${escapeHTML(label)}</div>
+    <div class="option-choice-grid" role="group" aria-label="${escapeHTML(label)}">
+      ${options.map(([optionText, value, disabled = false]) => `<m3e-button variant="tonal" size="small" class="option"
+        data-value="${escapeHTML(value)}" ${disabled ? 'disabled' : ''}>${escapeHTML(optionText)}</m3e-button>`).join('')}
+    </div></div>`).join('')}</div>`,
+    `<m3e-button variant="text" id="option-close">${escapeHTML(t('close'))}</m3e-button>`, {singleActions: true});
+  $$('.option', overlay).forEach(button => button.onclick = async () => {
+    const value = button.dataset.value;
+    closeMaterialDialog(overlay);
+    await onSelect(value);
+  });
+  $('#option-close', overlay).onclick = () => closeMaterialDialog(overlay);
+  openMaterialDialog(overlay);
 }
 
 async function monitorScan(token, observedRunning = false, observedThumbnailing = false, observedCleanup = false) {
@@ -724,8 +800,12 @@ async function monitorScan(token, observedRunning = false, observedThumbnailing 
       ? Math.round(progress.thumbnailCleanupDone * 100 / progress.thumbnailCleanupTotal)
       : 0;
     bar.hidden = !working;
-    bar.classList.toggle('indeterminate', (progress.scanning && !progress.total) || (progress.thumbnailCleaning && !progress.thumbnailCleanupTotal));
-    $('i', bar).style.width = `${progress.thumbnailCleaning ? cleanupPercent : (progress.thumbnailing ? thumbnailPercent : (progress.percent || 0))}%`;
+    const indeterminate = (progress.scanning && !progress.total) || (progress.thumbnailCleaning && !progress.thumbnailCleanupTotal);
+    bar.mode = indeterminate ? 'indeterminate' : 'determinate';
+    bar.max = 100;
+    if (!indeterminate) {
+      bar.value = progress.thumbnailCleaning ? cleanupPercent : (progress.thumbnailing ? thumbnailPercent : (progress.percent || 0));
+    }
     if (working) {
       state.pollTimer = setTimeout(() => monitorScan(
         token,
@@ -790,12 +870,75 @@ function findItem(id) {
   return state.items.find(item => item.id === id);
 }
 
-function openViewer(id, paneIndex = 0, swipeOffset = 0) {
+function materialViewTransitionsEnabled() {
+  return !embeddedMode && 'startViewTransition' in document;
+}
+
+function visibleGalleryImage(id) {
+  const tile = $(`.tile[data-id="${CSS.escape(id)}"]`);
+  const image = $('img', tile);
+  if (!image) return null;
+  const rect = image.getBoundingClientRect();
+  if (rect.bottom <= 0 || rect.top >= innerHeight || rect.right <= 0 || rect.left >= innerWidth) return null;
+  return image;
+}
+
+function currentViewerTransitionMedia() {
+  return $('.swipe-slide-current .viewer-image-placeholder', app) || $('.swipe-slide-current .media', app);
+}
+
+function openViewerFromTile(tile) {
+  const id = tile?.dataset.id;
+  if (!id) return;
+  state.viewerTransitionSourceId = id;
+  const source = $('img', tile);
+  if (!source || !materialViewTransitionsEnabled()) {
+    openViewer(id, 0);
+    return;
+  }
+  source.style.viewTransitionName = 'nas-photo-media';
+  let target = null;
+  const transition = document.startViewTransition(() => {
+    source.style.viewTransitionName = 'none';
+    openViewer(id, 0);
+    target = currentViewerTransitionMedia();
+    if (target) target.style.viewTransitionName = 'nas-photo-media';
+  });
+  transition.finished.catch(() => {}).finally(() => {
+    source.style.viewTransitionName = '';
+    if (target) target.style.viewTransitionName = '';
+  });
+}
+
+function leaveViewerWithTransition() {
+  const id = state.viewer[0];
+  const target = currentViewerTransitionMedia();
+  const galleryImage = id && id === state.viewerTransitionSourceId ? visibleGalleryImage(id) : null;
+  if (!target || !galleryImage || !materialViewTransitionsEnabled() || state.split) {
+    leaveViewer();
+    return;
+  }
+  target.style.viewTransitionName = 'nas-photo-media';
+  const transition = document.startViewTransition(() => {
+    target.style.viewTransitionName = 'none';
+    leaveViewer();
+    galleryImage.style.viewTransitionName = 'nas-photo-media';
+  });
+  transition.finished.catch(() => {}).finally(() => {
+    target.style.viewTransitionName = '';
+    galleryImage.style.viewTransitionName = '';
+  });
+}
+
+function openViewer(id, paneIndex = 0, swipeOffset = 0, swipeVelocity = 0) {
   hideTooltip();
   state.viewer[paneIndex] = id;
   state.activePane = paneIndex;
+  state.zoomAnimationCancel[paneIndex]?.();
+  state.zoomAnimationCancel[paneIndex] = null;
   state.zoom[paneIndex] = {scale:1, x:0, y:0};
   state.swipeOffset[paneIndex] = swipeOffset;
+  state.swipeVelocity[paneIndex] = swipeVelocity;
   if (embeddedMode && embeddedRole === 'primary') {
     parent.postMessage({type:'primaryMedia', id}, location.origin);
   }
@@ -822,8 +965,8 @@ function renderViewer() {
     ? `<main class="viewer is-split">
         <iframe class="split-window split-window-primary" data-role="primary"
           src="${embeddedURL('primary', state.viewer[0])}" title="${t('leftFrame')}"></iframe>
-        <div class="split-divider"><button class="end-split" aria-label="${t('endSplit')}"
-          data-tooltip="${t('endSplit')}" data-shortcut-action="splitToggle">×</button></div>
+        <div class="split-divider"><m3e-icon-button variant="tonal" size="small" class="end-split" aria-label="${t('endSplit')}"
+          data-tooltip="${t('endSplit')}" data-shortcut-action="splitToggle"><m3e-icon name="close"></m3e-icon></m3e-icon-button></div>
         <iframe class="split-window split-window-secondary" data-role="secondary"
           src="${embeddedURL('secondary')}" title="${t('rightFrame')}"></iframe>
       </main>`
@@ -863,7 +1006,7 @@ function bindViewerPane(root, preserveControls = false) {
   if (pane) bindPane(pane, preserveControls);
   $('.close-viewer', root)?.addEventListener('click', event => {
     event.stopPropagation();
-    leaveViewer();
+    leaveViewerWithTransition();
   });
   $('.add-pane', root)?.addEventListener('click', event => {
     event.stopPropagation();
@@ -881,6 +1024,7 @@ function leaveViewer() {
   state.split = false;
   $('.viewer-layer', app)?.remove();
   document.body.classList.remove('viewer-open');
+  state.viewerTransitionSourceId = null;
   requestAnimationFrame(() => window.scrollTo(0, scrollY));
 }
 
@@ -913,14 +1057,14 @@ function paneHTML(id, index) {
       <div class="swipe-slide swipe-slide-current">${media}</div>
       <div class="swipe-slide swipe-slide-next" data-available="${Boolean(next)}">${swipePreviewHTML(next)}</div>
     </div><div class="controls">
-      <button class="close-viewer" aria-label="${t('backGallery')}" data-tooltip="${t('backGallery')}" data-shortcut-label="Esc">×</button>
-      ${!embeddedMode && index === 0 && innerWidth >= 768 && !state.split ? `<button class="add-pane" aria-label="${t('splitToggle')}" data-tooltip="${t('addSplit')}" data-shortcut-action="splitToggle">＋</button>` : ''}
-      <button class="previous" aria-label="${t('previous')}" data-tooltip="${t('previous')}" data-shortcut-action="${previousAction}">←</button>
-      <button class="next" aria-label="${t('next')}" data-tooltip="${t('next')}" data-shortcut-action="${nextAction}">→</button>
+      <m3e-icon-button variant="tonal" size="small" class="close-viewer" aria-label="${t('backGallery')}" data-tooltip="${t('backGallery')}" data-shortcut-label="Esc"><m3e-icon name="close"></m3e-icon></m3e-icon-button>
+      ${!embeddedMode && index === 0 && innerWidth >= 768 && !state.split ? `<m3e-icon-button variant="tonal" size="small" class="add-pane" aria-label="${t('splitToggle')}" data-tooltip="${t('addSplit')}" data-shortcut-action="splitToggle"><m3e-icon name="add"></m3e-icon></m3e-icon-button>` : ''}
+      <m3e-icon-button variant="tonal" size="small" class="previous" aria-label="${t('previous')}" data-tooltip="${t('previous')}" data-shortcut-action="${previousAction}"><m3e-icon name="arrow_back"></m3e-icon></m3e-icon-button>
+      <m3e-icon-button variant="tonal" size="small" class="next" aria-label="${t('next')}" data-tooltip="${t('next')}" data-shortcut-action="${nextAction}"><m3e-icon name="arrow_forward"></m3e-icon></m3e-icon-button>
       ${item.kind === 'video' ? `<div class="video-options">
-        <button class="loop-toggle" aria-label="${t('loopToggle')}" data-tooltip="${t('loopTip')}" data-shortcut-action="loop">🔁 ${state.loop ? 'ON' : 'OFF'}</button>
-        <button class="mute-toggle" aria-label="${t('muteToggle')}" aria-pressed="${state.muted}"
-          data-tooltip="${t('muteTip')}" data-shortcut-action="mute">🔇 ${state.muted ? 'ON' : 'OFF'}</button>
+        <m3e-button variant="tonal" size="small" toggle ${state.loop ? 'selected' : ''} class="loop-toggle" aria-label="${t('loopToggle')}" data-tooltip="${t('loopTip')}" data-shortcut-action="loop"><m3e-icon slot="icon" name="repeat"></m3e-icon><span class="toggle-state">${state.loop ? 'ON' : 'OFF'}</span></m3e-button>
+        <m3e-button variant="tonal" size="small" toggle ${state.muted ? 'selected' : ''} class="mute-toggle" aria-label="${t('muteToggle')}"
+          data-tooltip="${t('muteTip')}" data-shortcut-action="mute"><m3e-icon slot="icon" name="volume_off"></m3e-icon><span class="toggle-state">${state.muted ? 'ON' : 'OFF'}</span></m3e-button>
       </div>` : ''}
     </div></section>`;
 }
@@ -933,8 +1077,9 @@ function swipePreviewHTML(item) {
   if (!item) return '';
   const source = mediaThumbnailURL(item);
   return `<span class="swipe-preview-wrap">
-    <img class="swipe-preview" src="${source}" alt="" draggable="false" decoding="async">
-    ${item.kind === 'video' ? '<span class="swipe-preview-play" aria-hidden="true">▶</span>' : ''}
+    <img class="swipe-preview" src="${source}" alt="" draggable="false" decoding="async"
+      data-media-width="${Number(item.width) || 0}" data-media-height="${Number(item.height) || 0}">
+    ${item.kind === 'video' ? '<span class="swipe-preview-play" aria-hidden="true"><m3e-icon name="play_arrow"></m3e-icon></span>' : ''}
   </span>`;
 }
 
@@ -962,7 +1107,7 @@ function bindPane(pane, preserveControls = false) {
     const outsideImage = image && event.target.closest('.viewer-image-stage') &&
       isPointOutsideDisplayedImage(pane, image, state.zoom[index], event.clientX, event.clientY);
     if (event.target === pane || event.target.classList.contains('swipe-slide') || outsideImage) {
-      leaveViewer();
+      leaveViewerWithTransition();
     }
   };
   $('.previous', pane)?.addEventListener('click', event => { event.stopPropagation(); move(index, -1); });
@@ -972,7 +1117,7 @@ function bindPane(pane, preserveControls = false) {
     state.loop = !state.loop;
     savePreferences();
     $$('video').forEach(video => video.loop = state.loop);
-    $$('.loop-toggle').forEach(button => button.textContent = `🔁 ${state.loop ? 'ON' : 'OFF'}`);
+    syncVideoOptionButtons();
   });
   $('.mute-toggle', pane)?.addEventListener('click', event => {
     event.stopPropagation();
@@ -981,14 +1126,22 @@ function bindPane(pane, preserveControls = false) {
   bindSwipe(pane, index);
 }
 
+function syncVideoOptionButtons() {
+  $$('.loop-toggle').forEach(button => {
+    button.selected = state.loop;
+    $('.toggle-state', button).textContent = state.loop ? 'ON' : 'OFF';
+  });
+  $$('.mute-toggle').forEach(button => {
+    button.selected = state.muted;
+    $('.toggle-state', button).textContent = state.muted ? 'ON' : 'OFF';
+  });
+}
+
 function applyMuted(value) {
   state.muted = Boolean(value);
   savePreferences();
   $$('video').forEach(video => video.muted = state.muted);
-  $$('.mute-toggle').forEach(button => {
-    button.textContent = `🔇 ${state.muted ? 'ON' : 'OFF'}`;
-    button.setAttribute('aria-pressed', String(state.muted));
-  });
+  syncVideoOptionButtons();
 }
 
 function toggleMuted() {
@@ -1035,13 +1188,36 @@ function bindControlVisibility(pane, preserve = false) {
   }
 }
 
+function containedMediaSize(containerWidth, containerHeight, naturalWidth, naturalHeight) {
+  const width = Math.max(1, Number(naturalWidth) || containerWidth);
+  const height = Math.max(1, Number(naturalHeight) || containerHeight);
+  const fit = Math.min(containerWidth / width, containerHeight / height);
+  return {width:width * fit, height:height * fit};
+}
+
 function containedImageSize(pane, image) {
   const placeholder = $('.viewer-image-placeholder', image.closest('.viewer-image-stage'));
   const measurable = image.naturalWidth ? image : placeholder;
-  const naturalWidth = measurable?.naturalWidth || pane.clientWidth;
-  const naturalHeight = measurable?.naturalHeight || pane.clientHeight;
-  const fit = Math.min(pane.clientWidth / naturalWidth, pane.clientHeight / naturalHeight);
-  return {width:naturalWidth * fit, height:naturalHeight * fit};
+  return containedMediaSize(
+    pane.clientWidth, pane.clientHeight,
+    measurable?.naturalWidth || pane.clientWidth,
+    measurable?.naturalHeight || pane.clientHeight
+  );
+}
+
+function fitSwipePreviews(pane) {
+  $$('.swipe-preview', pane).forEach(image => {
+    const fit = () => {
+      const naturalWidth = Number(image.dataset.mediaWidth) || image.naturalWidth;
+      const naturalHeight = Number(image.dataset.mediaHeight) || image.naturalHeight;
+      if (!naturalWidth || !naturalHeight || !pane.clientWidth || !pane.clientHeight) return;
+      const rendered = containedMediaSize(pane.clientWidth, pane.clientHeight, naturalWidth, naturalHeight);
+      image.style.width = `${rendered.width}px`;
+      image.style.height = `${rendered.height}px`;
+    };
+    fit();
+    if (!image.complete) image.addEventListener('load', fit, {once:true});
+  });
 }
 
 function imageZoomBounds(pane, image, scale) {
@@ -1068,9 +1244,53 @@ function clampValue(value, minimum, maximum) {
 }
 
 function resistBound(value, limit) {
-  if (value > limit) return limit + (value - limit) * .24;
-  if (value < -limit) return -limit + (value + limit) * .24;
+  if (value > limit) return limit + (value - limit) * GESTURE_END_FRICTION;
+  if (value < -limit) return -limit + (value + limit) * GESTURE_END_FRICTION;
   return value;
+}
+
+function projectGestureVelocity(velocity, decelerationRate = 0.995) {
+  return velocity * decelerationRate / (1 - decelerationRate);
+}
+
+function startGestureSpring({start, end, velocity = 0, dampingRatio = 1, naturalFrequency = 30, onUpdate, onComplete}) {
+  let position = start;
+  let speed = velocity * 1000;
+  let frame = 0;
+  let previousTime = performance.now();
+  let active = true;
+  const initialDistance = Math.abs(end - start);
+  const positionTolerance = Math.max(0.001, initialDistance * 0.001);
+  const speedTolerance = Math.max(0.02, initialDistance * 0.05);
+
+  const step = now => {
+    if (!active) return;
+    let remaining = Math.min(32, Math.max(0, now - previousTime)) / 1000;
+    previousTime = now;
+    while (remaining > 0) {
+      const dt = Math.min(remaining, 1 / 120);
+      const displacement = position - end;
+      const acceleration = -2 * dampingRatio * naturalFrequency * speed
+        - naturalFrequency * naturalFrequency * displacement;
+      speed += acceleration * dt;
+      position += speed * dt;
+      remaining -= dt;
+    }
+    onUpdate(position);
+    if (Math.abs(position - end) <= positionTolerance && Math.abs(speed) <= speedTolerance) {
+      onUpdate(end);
+      active = false;
+      onComplete?.();
+      return;
+    }
+    frame = requestAnimationFrame(step);
+  };
+
+  frame = requestAnimationFrame(step);
+  return () => {
+    active = false;
+    cancelAnimationFrame(frame);
+  };
 }
 
 function clampImageZoom(pane, image, zoom) {
@@ -1083,13 +1303,54 @@ function clampImageZoom(pane, image, zoom) {
   };
 }
 
-function applyImageZoom(image, zoom, animate = false) {
+function applyImageZoom(image, zoom) {
   image.classList.toggle('is-zoomed', zoom.scale > 1.001);
-  image.classList.toggle('is-zoom-settling', animate);
   const transform = `translate3d(${zoom.x}px, ${zoom.y}px, 0) scale(${zoom.scale})`;
   image.style.transform = transform;
-  const placeholder = $('.viewer-image-placeholder', image.closest('.viewer-image-stage'));
+  const stage = image.closest('.viewer-image-stage');
+  const placeholder = stage ? $('.viewer-image-placeholder', stage) : null;
   if (placeholder) placeholder.style.transform = transform;
+}
+
+function animateImageZoomTo(pane, image, index, target, options = {}) {
+  state.zoomAnimationCancel[index]?.();
+  const start = {...state.zoom[index]};
+  const distance = {
+    scale: target.scale - start.scale,
+    x: target.x - start.x,
+    y: target.y - start.y
+  };
+  const velocity = options.velocity || {x:0, y:0};
+  const dominantAxis = Math.abs(distance.x) >= Math.abs(distance.y) ? 'x' : 'y';
+  const dominantDistance = distance[dominantAxis];
+  const progressVelocity = Math.abs(dominantDistance) > 0.5
+    ? (velocity[dominantAxis] || 0) / dominantDistance
+    : 0;
+  const cancel = startGestureSpring({
+    start: 0,
+    end: 1,
+    velocity: progressVelocity,
+    dampingRatio: options.dampingRatio ?? 1,
+    naturalFrequency: options.naturalFrequency ?? GESTURE_ZOOM_SPRING_FREQUENCY,
+    onUpdate: progress => {
+      if (!image.isConnected) {
+        cancel();
+        return;
+      }
+      state.zoom[index] = {
+        scale: start.scale + distance.scale * progress,
+        x: start.x + distance.x * progress,
+        y: start.y + distance.y * progress
+      };
+      applyImageZoom(image, state.zoom[index]);
+    },
+    onComplete: () => {
+      state.zoom[index] = {...target};
+      applyImageZoom(image, state.zoom[index]);
+      state.zoomAnimationCancel[index] = null;
+    }
+  });
+  state.zoomAnimationCancel[index] = cancel;
 }
 
 function revealFullViewerImage(image) {
@@ -1099,7 +1360,7 @@ function revealFullViewerImage(image) {
     if (!image.isConnected || !image.naturalWidth) return;
     stage.classList.add('is-loaded');
     const placeholder = $('.viewer-image-placeholder', stage);
-    if (placeholder) setTimeout(() => placeholder.remove(), 220);
+    if (placeholder) setTimeout(() => placeholder.remove(), 110);
   };
   if (image.complete && image.naturalWidth) {
     image.decode?.().then(reveal, reveal);
@@ -1108,30 +1369,52 @@ function revealFullViewerImage(image) {
   }
 }
 
-function settleImageZoom(pane, image, index, animate = true) {
-  state.zoom[index] = clampImageZoom(pane, image, state.zoom[index]);
-  applyImageZoom(image, state.zoom[index], animate);
+function settleImageZoom(pane, image, index, animate = true, velocity = {x:0, y:0}) {
+  const current = state.zoom[index];
+  const projected = current.scale >= 1 && current.scale <= MAX_IMAGE_ZOOM
+    ? {
+        scale: current.scale,
+        x: current.x + projectGestureVelocity(velocity.x || 0),
+        y: current.y + projectGestureVelocity(velocity.y || 0)
+      }
+    : current;
+  const target = clampImageZoom(pane, image, projected);
+  if (!animate) {
+    state.zoomAnimationCancel[index]?.();
+    state.zoomAnimationCancel[index] = null;
+    state.zoom[index] = target;
+    applyImageZoom(image, target);
+    return;
+  }
+  const projectedOutsideBounds = Math.abs(projected.x - target.x) > 0.5 || Math.abs(projected.y - target.y) > 0.5;
+  animateImageZoomTo(pane, image, index, target, {
+    velocity,
+    naturalFrequency: GESTURE_PAN_SPRING_FREQUENCY,
+    dampingRatio: projectedOutsideBounds ? 0.82 : 1
+  });
 }
 
 function toggleImageZoomAt(pane, image, index, clientX, clientY) {
   const current = state.zoom[index];
+  let target;
   if (current.scale > 1.001) {
-    state.zoom[index] = {scale:1, x:0, y:0};
+    target = {scale:1, x:0, y:0};
   } else {
     const rect = pane.getBoundingClientRect();
     const centerX = rect.left + rect.width / 2;
     const centerY = rect.top + rect.height / 2;
     const ratio = DOUBLE_TAP_IMAGE_ZOOM / current.scale;
-    state.zoom[index] = clampImageZoom(pane, image, {
+    target = clampImageZoom(pane, image, {
       scale: DOUBLE_TAP_IMAGE_ZOOM,
       x: clientX - centerX - (clientX - centerX - current.x) * ratio,
       y: clientY - centerY - (clientY - centerY - current.y) * ratio
     });
   }
-  applyImageZoom(image, state.zoom[index], true);
+  animateImageZoomTo(pane, image, index, target, {naturalFrequency: GESTURE_ZOOM_SPRING_FREQUENCY});
 }
 
 function bindSwipe(pane, index) {
+  fitSwipePreviews(pane);
   const track = $('.swipe-track', pane);
   const image = $('.swipe-slide-current .zoomable', pane);
   const previousAvailable = $('.swipe-slide-previous', pane)?.dataset.available === 'true';
@@ -1139,16 +1422,55 @@ function bindSwipe(pane, index) {
   const pointers = new Map();
   let primaryPointerId = null;
   let mode = 'idle';
-  let startX = 0, startY = 0, startTime = 0, lastX = 0, lastTime = 0, velocityX = 0;
+  let dragAxis = null;
+  let startX = 0;
+  let startY = 0;
   let startOffset = 0;
   let displayedOffset = Number(state.swipeOffset[index]) || 0;
+  const initialSettleVelocity = Number(state.swipeVelocity[index]) || 0;
   let panStart = null;
   let pinchStart = null;
   let lastTap = null;
   let suppressDblClickUntil = 0;
-  const setOffset = (offset, animate = false) => {
-    track.classList.toggle('is-settling', animate);
+  let trackSpringCancel = null;
+  let gestureFrame = 0;
+  let pendingOffset = null;
+  let pendingZoom = null;
+  let sampleTime = 0;
+  let sampleX = 0;
+  let sampleY = 0;
+  const velocity = {x:0, y:0};
+
+  const setOffsetNow = offset => {
     track.style.transform = `translate3d(calc(-100% + ${offset}px), 0, 0)`;
+  };
+  const paintPending = () => {
+    gestureFrame = 0;
+    if (pendingOffset !== null) {
+      setOffsetNow(pendingOffset);
+      pendingOffset = null;
+    }
+    if (pendingZoom && image) {
+      applyImageZoom(image, pendingZoom);
+      pendingZoom = null;
+    }
+  };
+  const schedulePaint = () => {
+    if (!gestureFrame) gestureFrame = requestAnimationFrame(paintPending);
+  };
+  const queueOffset = offset => {
+    displayedOffset = offset;
+    pendingOffset = offset;
+    schedulePaint();
+  };
+  const queueZoom = zoom => {
+    state.zoom[index] = zoom;
+    pendingZoom = {...zoom};
+    schedulePaint();
+  };
+  const flushPaint = () => {
+    if (gestureFrame) cancelAnimationFrame(gestureFrame);
+    if (gestureFrame || pendingOffset !== null || pendingZoom) paintPending();
   };
   const readOffset = () => {
     const transform = getComputedStyle(track).transform;
@@ -1159,11 +1481,40 @@ function bindSwipe(pane, index) {
       return displayedOffset;
     }
   };
-  const settleTrack = () => {
-    track.classList.remove('is-dragging');
-    displayedOffset = 0;
-    setOffset(0, true);
+  const stopTrackSpring = () => {
+    trackSpringCancel?.();
+    trackSpringCancel = null;
+    track.classList.remove('is-settling');
   };
+  const springTrackTo = (target, releaseVelocity = 0) => {
+    flushPaint();
+    stopTrackSpring();
+    track.classList.remove('is-dragging');
+    track.classList.add('is-settling');
+    const springStart = displayedOffset;
+    trackSpringCancel = startGestureSpring({
+      start: springStart,
+      end: target,
+      velocity: releaseVelocity,
+      dampingRatio: 1,
+      naturalFrequency: GESTURE_SWIPE_SPRING_FREQUENCY,
+      onUpdate: offset => {
+        if (!track.isConnected) {
+          stopTrackSpring();
+          return;
+        }
+        displayedOffset = offset;
+        setOffsetNow(offset);
+      },
+      onComplete: () => {
+        displayedOffset = target;
+        setOffsetNow(target);
+        track.classList.remove('is-settling');
+        trackSpringCancel = null;
+      }
+    });
+  };
+  const settleTrack = (releaseVelocity = 0) => springTrackTo(0, releaseVelocity);
   const capturePointer = pointerId => {
     try { pane.setPointerCapture?.(pointerId); } catch {}
   };
@@ -1173,11 +1524,34 @@ function bindSwipe(pane, index) {
     y: (pair[0].y + pair[1].y) / 2
   });
   const distance = pair => Math.hypot(pair[0].x - pair[1].x, pair[0].y - pair[1].y);
+
+  const resetVelocity = (x, y) => {
+    sampleX = x;
+    sampleY = y;
+    sampleTime = performance.now();
+    velocity.x = 0;
+    velocity.y = 0;
+  };
+  const sampleVelocity = (x, y, force = false) => {
+    const now = performance.now();
+    const elapsed = now - sampleTime;
+    if (!force && elapsed < GESTURE_VELOCITY_SAMPLE_MS) return;
+    velocity.x = Math.abs(x - sampleX) > 1 && elapsed > 5 ? (x - sampleX) / elapsed : 0;
+    velocity.y = Math.abs(y - sampleY) > 1 && elapsed > 5 ? (y - sampleY) / elapsed : 0;
+    sampleX = x;
+    sampleY = y;
+    sampleTime = now;
+  };
+
   const beginPinch = () => {
     const pair = pointerPair();
     if (!image || pair.length < 2) return;
+    flushPaint();
+    stopTrackSpring();
+    state.zoomAnimationCancel[index]?.();
+    state.zoomAnimationCancel[index] = null;
     displayedOffset = 0;
-    setOffset(0);
+    setOffsetNow(0);
     const middle = midpoint(pair);
     pinchStart = {
       distance: Math.max(1, distance(pair)),
@@ -1185,9 +1559,9 @@ function bindSwipe(pane, index) {
       zoom: {...state.zoom[index]}
     };
     mode = 'pinch';
+    dragAxis = null;
     suppressNextViewerClick();
     pointers.forEach((_, pointerId) => capturePointer(pointerId));
-    image.classList.remove('is-zoom-settling');
   };
   const updatePinch = () => {
     const pair = pointerPair();
@@ -1195,9 +1569,9 @@ function bindSwipe(pane, index) {
     const middle = midpoint(pair);
     const rawScale = pinchStart.zoom.scale * distance(pair) / pinchStart.distance;
     const scale = rawScale < 1
-      ? 1 - (1 - rawScale) * .2
+      ? 1 - (1 - rawScale) * GESTURE_LOWER_ZOOM_FRICTION
       : rawScale > MAX_IMAGE_ZOOM
-      ? MAX_IMAGE_ZOOM + (rawScale - MAX_IMAGE_ZOOM) * .2
+      ? MAX_IMAGE_ZOOM + (rawScale - MAX_IMAGE_ZOOM) * GESTURE_UPPER_ZOOM_FRICTION
       : rawScale;
     const rect = pane.getBoundingClientRect();
     const centerX = rect.left + rect.width / 2;
@@ -1205,35 +1579,31 @@ function bindSwipe(pane, index) {
     const contentX = (pinchStart.midpoint.x - centerX - pinchStart.zoom.x) / pinchStart.zoom.scale;
     const contentY = (pinchStart.midpoint.y - centerY - pinchStart.zoom.y) / pinchStart.zoom.scale;
     const bounds = imageZoomBounds(pane, image, scale);
-    state.zoom[index] = {
+    queueZoom({
       scale,
       x: resistBound(middle.x - centerX - contentX * scale, bounds.x),
       y: resistBound(middle.y - centerY - contentY * scale, bounds.y)
-    };
-    applyImageZoom(image, state.zoom[index]);
+    });
   };
   const continueWithRemainingPointer = () => {
     const remaining = pointers.entries().next().value;
     if (!remaining || !image) return;
     primaryPointerId = remaining[0];
-    startX = lastX = remaining[1].x;
+    startX = remaining[1].x;
     startY = remaining[1].y;
-    startTime = lastTime = performance.now();
-    velocityX = 0;
+    startOffset = displayedOffset = 0;
     panStart = {...state.zoom[index]};
-    mode = 'pan';
+    mode = 'pending';
+    dragAxis = null;
+    resetVelocity(startX, startY);
   };
 
-  track.addEventListener('transitionend', event => {
-    if (event.target !== track || event.propertyName !== 'transform' || primaryPointerId !== null) return;
-    track.classList.remove('is-settling');
-    displayedOffset = 0;
-  });
   state.swipeOffset[index] = 0;
+  state.swipeVelocity[index] = 0;
   if (displayedOffset) {
-    setOffset(displayedOffset);
+    setOffsetNow(displayedOffset);
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      if (primaryPointerId === null) settleTrack();
+      if (primaryPointerId === null) settleTrack(initialSettleVelocity);
     }));
   }
   if (image) {
@@ -1245,27 +1615,34 @@ function bindSwipe(pane, index) {
       event.preventDefault();
       event.stopPropagation();
       if (performance.now() < suppressDblClickUntil) return;
+      flushPaint();
+      stopTrackSpring();
       displayedOffset = 0;
-      setOffset(0);
+      setOffsetNow(0);
       toggleImageZoomAt(pane, image, index, event.clientX, event.clientY);
     });
     image.addEventListener('contextmenu', event => {
       event.preventDefault();
-      state.zoom[index] = {scale:1, x:0, y:0};
-      applyImageZoom(image, state.zoom[index], true);
+      animateImageZoomTo(pane, image, index, {scale:1, x:0, y:0}, {
+        naturalFrequency: GESTURE_ZOOM_SPRING_FREQUENCY
+      });
     });
   }
 
   pane.addEventListener('pointerdown', event => {
     const media = event.target.closest('.media, .swipe-preview');
-    const continuingSettle = track.classList.contains('is-settling');
+    const continuingSettle = Boolean(trackSpringCancel) || track.classList.contains('is-settling');
     if (event.button !== 0 || !media || (!continuingSettle && !media.closest('.swipe-slide-current'))) return;
     const video = event.target.closest('video');
     if (video && event.clientY >= video.getBoundingClientRect().bottom - 64) return;
+    flushPaint();
     if (continuingSettle) {
       displayedOffset = readOffset();
-      setOffset(displayedOffset);
+      stopTrackSpring();
+      setOffsetNow(displayedOffset);
     }
+    state.zoomAnimationCancel[index]?.();
+    state.zoomAnimationCancel[index] = null;
     pointers.set(event.pointerId, {x:event.clientX, y:event.clientY, pointerType:event.pointerType});
     if (image && pointers.size === 2) {
       beginPinch();
@@ -1275,12 +1652,12 @@ function bindSwipe(pane, index) {
     if (pointers.size > 1) return;
     primaryPointerId = event.pointerId;
     mode = 'pending';
+    dragAxis = null;
     startOffset = displayedOffset;
-    startX = lastX = event.clientX;
+    startX = event.clientX;
     startY = event.clientY;
-    startTime = lastTime = performance.now();
-    velocityX = 0;
     panStart = image ? {...state.zoom[index]} : null;
+    resetVelocity(startX, startY);
   });
 
   pane.addEventListener('pointermove', event => {
@@ -1297,85 +1674,101 @@ function bindSwipe(pane, index) {
     const dx = event.clientX - startX;
     const dy = event.clientY - startY;
     if (mode === 'pending') {
-      if (Math.hypot(dx, dy) < 8) return;
+      if (Math.hypot(dx, dy) < GESTURE_AXIS_HYSTERESIS) return;
+      dragAxis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
       if (image && state.zoom[index].scale > 1.001) {
-        mode = 'pan';
-        image.classList.remove('is-zoom-settling');
-      } else if (Math.abs(dx) > Math.abs(dy) * 1.15) {
-        mode = 'swipe';
-        track.classList.add('is-dragging');
+        const bounds = imageZoomBounds(pane, image, state.zoom[index].scale);
+        const touchLike = event.pointerType !== 'mouse';
+        const canSwipeFromZoomEdge = dragAxis === 'x' && touchLike && (
+          (dx > 0 && previousAvailable && panStart.x >= bounds.x - 0.5) ||
+          (dx < 0 && nextAvailable && panStart.x <= -bounds.x + 0.5)
+        );
+        mode = canSwipeFromZoomEdge ? 'swipe' : 'pan';
       } else {
-        mode = 'ignored';
-        return;
+        mode = dragAxis === 'x' ? 'swipe' : 'ignored';
       }
+      if (mode === 'ignored') return;
       suppressNextViewerClick();
       capturePointer(event.pointerId);
+      if (mode === 'swipe') track.classList.add('is-dragging');
+      startX = event.clientX;
+      startY = event.clientY;
+      startOffset = displayedOffset;
+      panStart = image ? {...state.zoom[index]} : null;
+      resetVelocity(startX, startY);
+      event.preventDefault();
+      return;
     }
+    sampleVelocity(event.clientX, event.clientY);
     if (mode === 'pan' && image && panStart) {
       const bounds = imageZoomBounds(pane, image, state.zoom[index].scale);
-      state.zoom[index] = {
+      queueZoom({
         scale: state.zoom[index].scale,
-        x: resistBound(panStart.x + dx, bounds.x),
-        y: resistBound(panStart.y + dy, bounds.y)
-      };
-      applyImageZoom(image, state.zoom[index]);
+        x: resistBound(panStart.x + (event.clientX - startX), bounds.x),
+        y: resistBound(panStart.y + (event.clientY - startY), bounds.y)
+      });
       event.preventDefault();
       return;
     }
     if (mode !== 'swipe') return;
-    const now = performance.now();
-    const elapsed = now - lastTime;
-    if (elapsed > 0) velocityX = (event.clientX - lastX) / elapsed;
-    lastX = event.clientX;
-    lastTime = now;
-    const atEdge = (dx > 0 && !previousAvailable) || (dx < 0 && !nextAvailable);
-    displayedOffset = startOffset + (atEdge ? dx * .28 : dx);
-    setOffset(displayedOffset);
+    const swipeDx = event.clientX - startX;
+    const atEdge = (swipeDx > 0 && !previousAvailable) || (swipeDx < 0 && !nextAvailable);
+    queueOffset(startOffset + (atEdge ? swipeDx * GESTURE_END_FRICTION : swipeDx));
     event.preventDefault();
   });
 
   pane.addEventListener('pointerup', event => {
     if (!pointers.has(event.pointerId)) return;
+    if (event.pointerId === primaryPointerId && mode !== 'pinch') {
+      sampleVelocity(event.clientX, event.clientY, true);
+    }
     pointers.delete(event.pointerId);
+    flushPaint();
     if (mode === 'pinch') {
       suppressNextViewerClick();
       if (pointers.size) {
         continueWithRemainingPointer();
       } else if (image) {
         primaryPointerId = null;
-        settleImageZoom(pane, image, index);
+        settleImageZoom(pane, image, index, true);
         mode = 'idle';
+        dragAxis = null;
       }
       event.preventDefault();
       return;
     }
     if (event.pointerId !== primaryPointerId) return;
     primaryPointerId = null;
+    const releaseVelocity = {...velocity};
     if (mode === 'swipe') {
       suppressNextViewerClick();
-      const dx = event.clientX - startX;
-      const elapsed = performance.now() - startTime;
-      const distanceThreshold = Math.min(pane.clientWidth * .22, 140);
-      const fastSwipe = elapsed < 700 && Math.abs(velocityX) >= .45 && Math.abs(dx) >= 28;
-      const direction = Math.abs(dx) >= distanceThreshold || fastSwipe ? (dx < 0 ? 1 : -1) : 0;
+      const projectedOffset = displayedOffset + projectGestureVelocity(releaseVelocity.x);
+      const distanceThreshold = clampValue(pane.clientWidth * 0.2, 50, 225);
+      const velocityCommit = Math.abs(releaseVelocity.x) >= GESTURE_MIN_SWIPE_SPEED
+        && Math.abs(displayedOffset) >= GESTURE_AXIS_HYSTERESIS;
+      const distanceCommit = Math.abs(projectedOffset) >= distanceThreshold;
+      const directionSource = velocityCommit ? releaseVelocity.x : projectedOffset;
+      const direction = velocityCommit || distanceCommit ? (directionSource < 0 ? 1 : -1) : 0;
       const canMove = direction < 0 ? previousAvailable : direction > 0 ? nextAvailable : false;
       if (canMove) {
+        stopTrackSpring();
         track.classList.remove('is-dragging');
-        move(index, direction, displayedOffset + direction * pane.clientWidth);
+        move(index, direction, displayedOffset + direction * pane.clientWidth, releaseVelocity.x);
       } else {
-        settleTrack();
+        settleTrack(releaseVelocity.x);
       }
       event.preventDefault();
     } else if (mode === 'pan' && image) {
       suppressNextViewerClick();
-      settleImageZoom(pane, image, index);
+      settleImageZoom(pane, image, index, true, releaseVelocity);
       event.preventDefault();
     } else if (mode === 'pending' && image && event.pointerType === 'touch') {
       const now = performance.now();
       if (lastTap && now - lastTap.time <= DOUBLE_TAP_DELAY &&
           Math.hypot(event.clientX - lastTap.x, event.clientY - lastTap.y) <= DOUBLE_TAP_DISTANCE) {
+        stopTrackSpring();
         displayedOffset = 0;
-        setOffset(0);
+        setOffsetNow(0);
         toggleImageZoomAt(pane, image, index, event.clientX, event.clientY);
         suppressNextViewerClick();
         suppressDblClickUntil = now + 500;
@@ -1386,20 +1779,24 @@ function bindSwipe(pane, index) {
       }
     }
     mode = 'idle';
+    dragAxis = null;
   });
 
   pane.addEventListener('pointercancel', event => {
     if (!pointers.has(event.pointerId)) return;
     pointers.clear();
     primaryPointerId = null;
-    if (mode === 'swipe') settleTrack();
-    if ((mode === 'pan' || mode === 'pinch') && image) settleImageZoom(pane, image, index);
+    flushPaint();
+    if (mode === 'swipe') settleTrack(velocity.x);
+    if ((mode === 'pan' || mode === 'pinch') && image) settleImageZoom(pane, image, index, true, velocity);
     mode = 'idle';
+    dragAxis = null;
   });
 }
 
 function constrainVisibleViewerZoom() {
   $$('.viewer .pane').forEach(pane => {
+    fitSwipePreviews(pane);
     const image = $('.swipe-slide-current .zoomable', pane);
     if (!image) return;
     const index = Number(pane.dataset.pane);
@@ -1407,7 +1804,7 @@ function constrainVisibleViewerZoom() {
   });
 }
 
-async function move(paneIndex, delta, swipeOffset = 0) {
+async function move(paneIndex, delta, swipeOffset = 0, swipeVelocity = 0) {
   const current = state.viewer[paneIndex];
   let index = state.items.findIndex(item => item.id === current);
   while (index < 0 && state.nextOffset >= 0) {
@@ -1421,46 +1818,60 @@ async function move(paneIndex, delta, swipeOffset = 0) {
     index = state.items.findIndex(item => item.id === current);
     next = state.items[index + delta];
   }
-  if (next) openViewer(next.id, paneIndex, swipeOffset);
+  if (next) openViewer(next.id, paneIndex, swipeOffset, swipeVelocity);
 }
 
-function showSettingsHome() {
-  clearTimeout(state.pollTimer);
-  app.innerHTML = `<main class="page settings"><header class="settings-header">
-    <button id="settings-back">← ${t('backGalleryButton')}</button><button class="secondary" id="logout">${t('logout')}</button>
-    </header><section class="settings-grid">
-      <button data-settings="shortcuts"><strong>${t('shortcutSettings')}</strong><span>${t('shortcutSummary')}</span></button>
-      <button data-settings="roots"><strong>${t('rootSettings')}</strong><span>${t('rootSummary')}</span></button>
-      <button data-settings="language"><strong>${t('languageSettings')}</strong><span>${t('languageSummary')}</span></button>
-      <button class="danger" data-settings="reset"><strong>${t('resetSettings')}</strong><span>${t('resetSummary')}</span></button>
-    </section></main>`;
-  $('#settings-back').onclick = showGallery;
-  $('#logout').onclick = async () => { await api('/api/auth/logout', {method: 'POST'}); showLogin(); };
-  $('[data-settings="shortcuts"]').onclick = showShortcutSettings;
-  $('[data-settings="roots"]').onclick = showRootSettings;
-  $('[data-settings="language"]').onclick = showLanguageSettings;
-  $('[data-settings="reset"]').onclick = showResetSettings;
+function renderSettingsDialog(dialog, title, body, actions, singleActions = false) {
+  renderMaterialDialog(dialog, title, body, actions, {contentClass: 'settings-dialog-body', singleActions});
 }
 
-async function showShortcutSettings() {
+function openSettingsDialog() {
+  const dialog = createMaterialDialogShell('option-dialog settings-dialog', t('settings'));
+  renderSettingsHome(dialog);
+  openMaterialDialog(dialog);
+}
+
+function renderSettingsHome(dialog) {
+  dialog.disableClose = false;
+  renderSettingsDialog(dialog, t('settings'), `
+    <div class="settings-dialog-menu">
+      <m3e-button variant="tonal" class="settings-dialog-item" data-settings="shortcuts">${t('shortcutSettings')}</m3e-button>
+      <m3e-button variant="tonal" class="settings-dialog-item" data-settings="roots">${t('rootSettings')}</m3e-button>
+      <m3e-button variant="tonal" class="settings-dialog-item" data-settings="language">${t('languageSettings')}</m3e-button>
+      <m3e-button variant="filled" class="settings-dialog-item danger" data-settings="reset">${t('resetSettings')}</m3e-button>
+      <m3e-button variant="tonal" class="settings-dialog-item" id="logout">${t('logout')}</m3e-button>
+    </div>`, `<m3e-button variant="text" id="settings-close">${t('close')}</m3e-button>`, true);
+
+  $('#settings-close', dialog).onclick = () => closeMaterialDialog(dialog);
+  $('#logout', dialog).onclick = async () => {
+    closeMaterialDialog(dialog);
+    await api('/api/auth/logout', {method:'POST'});
+    showLogin();
+  };
+  $('[data-settings="shortcuts"]', dialog).onclick = () => renderShortcutSettings(dialog);
+  $('[data-settings="roots"]', dialog).onclick = () => renderRootSettings(dialog);
+  $('[data-settings="language"]', dialog).onclick = () => renderLanguageSettings(dialog);
+  $('[data-settings="reset"]', dialog).onclick = () => renderResetSettings(dialog);
+}
+
+async function renderShortcutSettings(dialog) {
+  dialog.disableClose = true;
   const settings = await api('/api/settings');
   const shortcuts = {...state.shortcuts, ...(settings.shortcuts || {})};
   const labels = {
-    prev1:t('screen1Previous'), next1:t('screen1Next'),
-    prev2:t('screen2Previous'), next2:t('screen2Next'),
-    loop:t('loopToggle'), mute:t('muteToggle'),
-    splitToggle:t('splitToggle')
+    prev1:t('screen1Previous'), next1:t('screen1Next'), prev2:t('screen2Previous'), next2:t('screen2Next'),
+    loop:t('loopToggle'), mute:t('muteToggle'), splitToggle:t('splitToggle')
   };
-  app.innerHTML = `<main class="page settings"><button id="sub-back">← ${t('backSettings')}</button><section class="card">
-    <h1>${t('shortcutSettings')}</h1><p class="hint">${t('shortcutHint')}</p>
-    <div class="shortcut-list">${Object.entries(labels).map(([key,label]) =>
-      `<button class="secondary shortcut" data-shortcut="${key}"><span>${label}</span><kbd>${escapeHTML(shortcuts[key])}</kbd></button>`
-    ).join('')}</div><div class="settings-actions">
-      <button class="secondary" id="default-shortcuts">${t('restoreDefaults')}</button>
-      <button id="save-shortcuts">${t('save')}</button>
-    </div><p class="error"></p></section></main>`;
-  $('#sub-back').onclick = showSettingsHome;
-  $$('.shortcut').forEach(button => button.onclick = () => {
+  renderSettingsDialog(dialog, t('shortcutSettings'), `
+    <div class="settings-shortcut-list">${Object.entries(labels).map(([key,label]) =>
+      `<m3e-button variant="tonal" class="shortcut" data-shortcut="${key}"><span class="shortcut-content"><span>${label}</span><kbd>${escapeHTML(shortcuts[key])}</kbd></span></m3e-button>`
+    ).join('')}</div>
+    <m3e-button variant="tonal" id="default-shortcuts">${t('restoreDefaults')}</m3e-button><p class="error"></p>`, `
+    <m3e-button variant="text" id="settings-back">${t('backSettings')}</m3e-button>
+    <m3e-button variant="filled" id="save-shortcuts">${t('save')}</m3e-button>`);
+
+  $('#settings-back', dialog).onclick = () => renderSettingsHome(dialog);
+  $$('.shortcut', dialog).forEach(button => button.onclick = () => {
     button.querySelector('kbd').textContent = t('pressKey');
     const capture = event => {
       event.preventDefault();
@@ -1470,173 +1881,137 @@ async function showShortcutSettings() {
     };
     document.addEventListener('keydown', capture, true);
   });
-  $('#default-shortcuts').onclick = () => {
+  $('#default-shortcuts', dialog).onclick = () => {
     Object.assign(shortcuts, DEFAULT_SHORTCUTS);
-    $$('.shortcut').forEach(button => {
-      button.querySelector('kbd').textContent = shortcuts[button.dataset.shortcut];
-    });
+    $$('.shortcut', dialog).forEach(button => button.querySelector('kbd').textContent = shortcuts[button.dataset.shortcut]);
   };
-  $('#save-shortcuts').onclick = async () => {
+  $('#save-shortcuts', dialog).onclick = async () => {
     try {
       state.shortcuts = await api('/api/settings/shortcuts', {method:'PATCH', body:JSON.stringify(shortcuts)});
-      localStorage.setItem('nas-photo-shortcuts-sync', JSON.stringify({
-        shortcuts: state.shortcuts,
-        updatedAt: Date.now()
-      }));
-      showSettingsHome();
-    } catch (reason) {
-      $('.error').textContent = reason.message;
-    }
+      localStorage.setItem('nas-photo-shortcuts-sync', JSON.stringify({shortcuts:state.shortcuts, updatedAt:Date.now()}));
+      renderSettingsHome(dialog);
+    } catch (reason) { $('.error', dialog).textContent = reason.message; }
   };
 }
 
-function showLanguageSettings() {
-  app.innerHTML = `<main class="page settings"><button id="sub-back">← ${t('backSettings')}</button><section class="card">
-    <h1>${t('languageSettings')}</h1>
-    <div class="language-options">
-      <button data-language="en" class="${state.language === 'en' ? '' : 'secondary'}" aria-pressed="${state.language === 'en'}">English</button>
-      <button data-language="ja" class="${state.language === 'ja' ? '' : 'secondary'}" aria-pressed="${state.language === 'ja'}">日本語</button>
-    </div></section></main>`;
-  $('#sub-back').onclick = showSettingsHome;
-  $$('[data-language]').forEach(button => button.onclick = () => {
-    setLanguage(button.dataset.language);
-    showSettingsHome();
+function renderLanguageSettings(dialog) {
+  dialog.disableClose = true;
+  let draft = state.language;
+
+  renderSettingsDialog(dialog, t('languageSettings'), `<div class="option-choice-grid settings-language-grid">
+    <m3e-button variant="tonal" toggle ${draft === 'en' ? 'selected' : ''} data-language="en">English</m3e-button>
+    <m3e-button variant="tonal" toggle ${draft === 'ja' ? 'selected' : ''} data-language="ja">日本語</m3e-button>
+  </div>`, `
+    <m3e-button variant="text" id="settings-back">${t('backSettings')}</m3e-button>
+    <m3e-button variant="filled" id="settings-save-language">${t('save')}</m3e-button>`);
+  $$('[data-language]', dialog).forEach(button => button.onbeforeinput = event => {
+    event.preventDefault();
+    draft = button.dataset.language;
+    $$('[data-language]', dialog).forEach(candidate => candidate.selected = candidate.dataset.language === draft);
   });
+  $('#settings-back', dialog).onclick = () => renderSettingsHome(dialog);
+  $('#settings-save-language', dialog).onclick = async () => {
+    setLanguage(draft);
+    await showGallery();
+    renderSettingsHome(dialog);
+  };
 }
 
-async function showRootSettings() {
+async function renderRootSettings(dialog) {
+  dialog.disableClose = true;
   const settings = await api('/api/settings');
-  const roots = settings.roots || [];
-  app.innerHTML = `<main class="page settings"><button id="sub-back">← ${t('backSettings')}</button><section class="card">
-    <h1>${t('rootSettings')}</h1><div class="root-list">${roots.map(rootRow).join('') || `<p class="empty">${t('noRoots')}</p>`}</div>
-    <button id="settings-add-root">＋ ${t('addFolder')}</button><p class="error"></p></section></main>`;
-  $('#sub-back').onclick = showSettingsHome;
-  $$('.delete-root').forEach(button => button.onclick = async () => {
-    await api(`/api/roots/${button.dataset.id}`, {method:'DELETE'});
-    showRootSettings();
-  });
-  $('#settings-add-root').onclick = () => chooseFolder('', async path => {
-    try {
-      await api('/api/roots', {method:'POST', body:JSON.stringify({path})});
-      showRootSettings();
-    } catch (reason) {
-      $('.error').textContent = reason.message;
-    }
-  });
+  let draft = (settings.roots || []).map(root => ({...root}));
+  const renderRows = () => {
+    renderSettingsDialog(dialog, t('rootSettings'), `
+      <div class="settings-root-list">${draft.length ? draft.map(rootRow).join('') : `<p class="empty">${t('noRoots')}</p>`}
+        <m3e-button variant="tonal" id="settings-add-root"><m3e-icon slot="icon" name="add"></m3e-icon>${t('addFolder')}</m3e-button>
+      </div><p class="error"></p>`, `
+      <m3e-button variant="text" id="settings-back">${t('backSettings')}</m3e-button>
+      <m3e-button variant="filled" id="settings-save-roots" ${draft.length ? '' : 'disabled'}>${t('save')}</m3e-button>`);
+
+    $('#settings-back', dialog).onclick = () => renderSettingsHome(dialog);
+    $$('.delete-root', dialog).forEach(button => button.onclick = () => {
+      draft = draft.filter(root => root.id !== button.dataset.id);
+      renderRows();
+    });
+    $('#settings-add-root', dialog).onclick = () => chooseFolder('', path => {
+      const normalized = path.toLocaleLowerCase();
+      if (!draft.some(root => root.path.toLocaleLowerCase() === normalized)) {
+        const name = path.split(/[\\/]/).filter(Boolean).pop() || path;
+        draft.push({id:`draft-${crypto.randomUUID()}`, path, name});
+      }
+      renderRows();
+    });
+    $('#settings-save-roots', dialog).onclick = async () => {
+      try {
+        await api('/api/settings/roots', {method:'PATCH', body:JSON.stringify({paths:draft.map(root => root.path)})});
+        renderSettingsHome(dialog);
+        setTimeout(() => monitorScan(state.galleryToken), 250);
+      } catch (reason) { $('.error', dialog).textContent = reason.message; }
+    };
+  };
+  renderRows();
 }
 
-function showResetSettings() {
-  app.innerHTML = `<main class="page settings"><button id="sub-back">← ${t('backSettings')}</button><section class="card">
-    <h1>${t('resetTitle')}</h1>
+function renderResetSettings(dialog) {
+  dialog.disableClose = true;
+  renderSettingsDialog(dialog, t('resetTitle'), `
     <p>${t('resetInfo')}</p>
-    <label>${t('currentPassword')}<input id="reset-password" type="password"></label>
+    <label>${t('currentPassword')}<input id="reset-password" type="password" autocomplete="current-password"></label>
     <label class="confirm-check"><input id="reset-confirm" type="checkbox"> ${t('confirmImpact')}</label>
-    <button class="danger" id="reset-app">${t('reset')}</button><p class="error"></p></section></main>`;
-  $('#sub-back').onclick = showSettingsHome;
-  $('#reset-app').onclick = async () => {
-    if (!$('#reset-confirm').checked) return $('.error').textContent = t('confirmImpactError');
-    if (!confirm(t('finalResetConfirm'))) return;
-    try {
-      await api('/api/settings/reset', {method:'POST', body:JSON.stringify({password:$('#reset-password').value})});
-      localStorage.removeItem('nas-photo-preferences');
-      boot();
-    } catch {
-      $('.error').textContent = t('currentPasswordError');
-    }
+    <p class="error"></p>`, `
+
+    <m3e-button variant="text" id="settings-back">${t('backSettings')}</m3e-button>
+    <m3e-button variant="filled" class="danger" id="reset-app">${t('reset')}</m3e-button>`);
+  $('#settings-back', dialog).onclick = () => renderSettingsHome(dialog);
+  $('#reset-app', dialog).onclick = () => {
+    if (!$('#reset-confirm', dialog).checked) return $('.error', dialog).textContent = t('confirmImpactError');
+    renderResetConfirmation(dialog, $('#reset-password', dialog).value);
   };
 }
 
-let tooltipTimer = null;
-let tooltipTarget = null;
-let tooltipNode = null;
+function renderResetConfirmation(dialog, password) {
+  dialog.disableClose = true;
+  renderSettingsDialog(dialog, t('resetTitle'), `<p>${t('finalResetConfirm')}</p><p class="error"></p>`, `
+    <m3e-button variant="text" id="settings-back">${t('backSettings')}</m3e-button>
+    <m3e-button variant="filled" class="danger" id="reset-confirm-final">${t('reset')}</m3e-button>`);
+  $('#settings-back', dialog).onclick = () => renderResetSettings(dialog);
+  $('#reset-confirm-final', dialog).onclick = async () => {
+    try {
+      await api('/api/settings/reset', {method:'POST', body:JSON.stringify({password})});
+      localStorage.removeItem('nas-photo-preferences');
+      closeMaterialDialog(dialog);
+      boot();
+    } catch { $('.error', dialog).textContent = t('currentPasswordError'); }
+  };
+}
+
+let tooltipSerial = 0;
+function hideTooltip() {
+  $$('m3e-tooltip[data-nas-photo-tooltip]', document).forEach(tooltip => tooltip.hide?.());
+}
 
 function shortcutLabel(code) {
-  const labels = {
-    Space: 'Space', Escape: 'Esc', ArrowLeft: '←', ArrowRight: '→',
-    ArrowUp: '↑', ArrowDown: '↓'
-  };
+  const labels = {Space: 'Space', Escape: 'Esc', ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓'};
   return labels[code] || String(code || '').replace(/^Key/, '').replace(/^Digit/, '');
 }
-
-function tooltipText(button) {
-  const description = button.dataset.tooltip ||
-    button.getAttribute('aria-label') ||
-    button.textContent.replace(/\s+/g, ' ').trim();
-  const shortcutCode = button.dataset.shortcutAction
-    ? state.shortcuts[button.dataset.shortcutAction]
-    : button.dataset.shortcutLabel;
-  return shortcutCode
-    ? `${description} (${t('tooltipShortcut')}: ${shortcutLabel(shortcutCode)})`
-    : description;
-}
-
-function showTooltip(button) {
-  if (!button.isConnected) return;
-  tooltipTarget = button;
-  if (!tooltipNode) {
-    tooltipNode = document.createElement('div');
-    tooltipNode.className = 'hover-tooltip';
-    tooltipNode.setAttribute('role', 'tooltip');
-    document.body.append(tooltipNode);
-  }
-  tooltipNode.textContent = tooltipText(button);
-  tooltipNode.hidden = false;
-  tooltipNode.classList.add('is-visible');
-  const targetRect = button.getBoundingClientRect();
-  const tipRect = tooltipNode.getBoundingClientRect();
-  const left = Math.max(8, Math.min(
-    innerWidth - tipRect.width - 8,
-    targetRect.left + (targetRect.width - tipRect.width) / 2
-  ));
-  const above = targetRect.top - tipRect.height - 10;
-  const top = above >= 8
-    ? above
-    : Math.min(innerHeight - tipRect.height - 8, targetRect.bottom + 10);
-  tooltipNode.style.left = `${left}px`;
-  tooltipNode.style.top = `${Math.max(8, top)}px`;
-}
-
-function hideTooltip() {
-  clearTimeout(tooltipTimer);
-  tooltipTimer = null;
-  tooltipTarget = null;
-  if (tooltipNode) {
-    tooltipNode.hidden = true;
-    tooltipNode.classList.remove('is-visible');
-  }
-}
-
-function tooltipButton(target) {
-  const button = target.closest?.('button');
-  if (!button) return null;
-  return button.matches('[data-tooltip]') ||
-    button.closest('.viewer, .top, .gallery, .load-area, .option-dialog')
-    ? button
-    : null;
-}
-
 function installTooltipSystem() {
-  document.addEventListener('pointerover', event => {
-    const button = tooltipButton(event.target);
-    if (!button || tooltipTarget === button) return;
-    hideTooltip();
-    tooltipTarget = button;
-    tooltipTimer = setTimeout(() => showTooltip(button), 750);
+  $$('m3e-tooltip[data-nas-photo-tooltip]', document).forEach(tooltip => {
+    if (!document.getElementById(tooltip.getAttribute('for'))) tooltip.remove();
   });
-  document.addEventListener('pointerout', event => {
-    const button = tooltipButton(event.target);
-    if (!button || button.contains(event.relatedTarget)) return;
-    hideTooltip();
+  $$('[data-tooltip]').forEach(button => {
+    if (button.dataset.m3eTooltipAttached) return;
+    if (!button.id) button.id = `tooltip-target-${++tooltipSerial}`;
+    const tooltip = document.createElement('m3e-tooltip');
+    tooltip.dataset.nasPhotoTooltip = 'true';
+    tooltip.setAttribute('for', button.id);
+    tooltip.position = 'above';
+    const shortcutCode = button.dataset.shortcutAction ? state.shortcuts[button.dataset.shortcutAction] : button.dataset.shortcutLabel;
+    const description = button.dataset.tooltip || button.getAttribute('aria-label') || button.textContent.replace(/\s+/g, ' ').trim();
+    tooltip.textContent = shortcutCode ? `${description} (${t('tooltipShortcut')}: ${shortcutLabel(shortcutCode)})` : description;
+    document.body.append(tooltip);
+    button.dataset.m3eTooltipAttached = 'true';
   });
-  document.addEventListener('pointerdown', hideTooltip);
-  document.addEventListener('focusin', event => {
-    const button = tooltipButton(event.target);
-    if (!button) return;
-    hideTooltip();
-    tooltipTarget = button;
-    tooltipTimer = setTimeout(() => showTooltip(button), 500);
-  });
-  document.addEventListener('focusout', hideTooltip);
 }
 
 document.addEventListener('keydown', event => {
@@ -1691,7 +2066,7 @@ document.addEventListener('keydown', event => {
     state.loop = !state.loop;
     savePreferences();
     $$('video').forEach(video => video.loop = state.loop);
-    $$('.loop-toggle').forEach(button => button.textContent = `🔁 ${state.loop ? 'ON' : 'OFF'}`);
+    syncVideoOptionButtons();
     if (state.split) postToSplit({type:'setLoop', value:state.loop});
   }
   if (event.code === 'Space') {
@@ -1703,7 +2078,7 @@ document.addEventListener('keydown', event => {
     const video = $(`.pane[data-pane="${state.activePane}"] video`);
     if (video) video.currentTime = Math.max(0, video.currentTime + (event.code === 'ArrowLeft' ? -10 : 10));
   }
-  if (event.code === 'Escape') leaveViewer();
+  if (event.code === 'Escape') leaveViewerWithTransition();
 });
 
 function postToSplit(message) {
@@ -1750,7 +2125,7 @@ window.addEventListener('message', event => {
     state.loop = Boolean(event.data.value);
     savePreferences();
     $$('video').forEach(video => video.loop = state.loop);
-    $$('.loop-toggle').forEach(button => button.textContent = `🔁 ${state.loop ? 'ON' : 'OFF'}`);
+    syncVideoOptionButtons();
   }
   if (event.data?.type === 'setMuted') applyMuted(event.data.value);
   if (event.data?.type === 'togglePlayback') {
@@ -1783,6 +2158,7 @@ window.addEventListener('storage', event => {
 });
 
 installTooltipSystem();
+new MutationObserver(() => installTooltipSystem()).observe(app, {childList: true, subtree: true});
 boot().catch(reason => {
   app.innerHTML = `<main class="page"><section class="card"><h1>NAS-PHOTO</h1>
     <p class="error">${t('bootError')}: ${escapeHTML(reason.message)}</p>
