@@ -133,6 +133,7 @@ const GESTURE_UPPER_ZOOM_FRICTION = 0.05;
 const GESTURE_SWIPE_SPRING_FREQUENCY = 30;
 const GESTURE_PAN_SPRING_FREQUENCY = 12;
 const GESTURE_ZOOM_SPRING_FREQUENCY = 40;
+const WHEEL_ZOOM_SENSITIVITY = 0.0025;
 
 const stored = JSON.parse(localStorage.getItem('nas-photo-preferences') || '{}');
 const state = {
@@ -1303,6 +1304,25 @@ function clampImageZoom(pane, image, zoom) {
   };
 }
 
+function imageZoomAtPoint(pane, image, zoom, targetScale, clientX, clientY) {
+  const scale = clampValue(targetScale, 1, MAX_IMAGE_ZOOM);
+  if (scale <= 1.001) return {scale:1, x:0, y:0};
+  const rect = pane.getBoundingClientRect();
+  const centerX = rect.left + rect.width / 2;
+  const centerY = rect.top + rect.height / 2;
+  const ratio = scale / zoom.scale;
+  return clampImageZoom(pane, image, {
+    scale,
+    x: clientX - centerX - (clientX - centerX - zoom.x) * ratio,
+    y: clientY - centerY - (clientY - centerY - zoom.y) * ratio
+  });
+}
+
+function normalizedWheelDelta(event, pane) {
+  const multiplier = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? pane.clientHeight : 1;
+  return clampValue(event.deltaY * multiplier, -240, 240);
+}
+
 function applyImageZoom(image, zoom) {
   image.classList.toggle('is-zoomed', zoom.scale > 1.001);
   const transform = `translate3d(${zoom.x}px, ${zoom.y}px, 0) scale(${zoom.scale})`;
@@ -1400,15 +1420,7 @@ function toggleImageZoomAt(pane, image, index, clientX, clientY) {
   if (current.scale > 1.001) {
     target = {scale:1, x:0, y:0};
   } else {
-    const rect = pane.getBoundingClientRect();
-    const centerX = rect.left + rect.width / 2;
-    const centerY = rect.top + rect.height / 2;
-    const ratio = DOUBLE_TAP_IMAGE_ZOOM / current.scale;
-    target = clampImageZoom(pane, image, {
-      scale: DOUBLE_TAP_IMAGE_ZOOM,
-      x: clientX - centerX - (clientX - centerX - current.x) * ratio,
-      y: clientY - centerY - (clientY - centerY - current.y) * ratio
-    });
+    target = imageZoomAtPoint(pane, image, current, DOUBLE_TAP_IMAGE_ZOOM, clientX, clientY);
   }
   animateImageZoomTo(pane, image, index, target, {naturalFrequency: GESTURE_ZOOM_SPRING_FREQUENCY});
 }
@@ -1627,6 +1639,21 @@ function bindSwipe(pane, index) {
         naturalFrequency: GESTURE_ZOOM_SPRING_FREQUENCY
       });
     });
+    pane.addEventListener('wheel', event => {
+      if (pointers.size || event.target.closest('.controls, button, m3e-button, m3e-icon-button, video')) return;
+      const delta = normalizedWheelDelta(event, pane);
+      if (!delta) return;
+      event.preventDefault();
+      flushPaint();
+      stopTrackSpring();
+      displayedOffset = 0;
+      setOffsetNow(0);
+      state.zoomAnimationCancel[index]?.();
+      state.zoomAnimationCancel[index] = null;
+      const current = state.zoom[index];
+      const targetScale = clampValue(current.scale * Math.exp(-delta * WHEEL_ZOOM_SENSITIVITY), 1, MAX_IMAGE_ZOOM);
+      queueZoom(imageZoomAtPoint(pane, image, current, targetScale, event.clientX, event.clientY));
+    }, {passive:false});
   }
 
   pane.addEventListener('pointerdown', event => {
