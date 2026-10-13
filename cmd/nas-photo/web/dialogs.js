@@ -31,6 +31,11 @@ function openMaterialDialog(dialog) {
   if (!dialog || dialog.isConnected) return;
   dialog.addEventListener('closed', () => dialog.remove(), {once: true});
   document.body.append(dialog);
+  // The dialog's scroll container is inside its shadow root.
+  const scrollbarStyles = document.createElement('link');
+  scrollbarStyles.rel = 'stylesheet';
+  scrollbarStyles.href = '/scrollbars.css';
+  dialog.shadowRoot?.append(scrollbarStyles);
   dialog.open = true;
 }
 

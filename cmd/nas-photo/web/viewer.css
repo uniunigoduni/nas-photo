@@ -4,6 +4,12 @@
   --nas-gallery-view-transition-easing: cubic-bezier(.2, 0, 0, 1);
 }
 
+html:has(body.viewer-open) {
+  overflow: hidden;
+  /* M3E dialogs also reserve a gutter inline; the viewer always fills it. */
+  scrollbar-gutter: auto !important;
+}
+
 body.viewer-open {
   overflow: hidden;
 }

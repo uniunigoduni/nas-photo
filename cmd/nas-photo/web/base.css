@@ -9,7 +9,7 @@ html {
   width: 100%;
   min-height: 100%;
   background: var(--nas-color-surface, #0b1020);
-  scrollbar-gutter: stable;
+  scrollbar-gutter: auto;
   color: var(--nas-color-on-surface, #f8fafc);
 }
 
