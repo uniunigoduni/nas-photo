@@ -69,6 +69,8 @@ type store struct {
 	Settings
 }
 type app struct {
+	libraryMu                sync.Mutex
+	duplicateGroups          map[string]string
 	st                       *store
 	allowed                  []string
 	log                      *slog.Logger
@@ -420,6 +422,12 @@ func (a *app) validRoots(paths []string) ([]Root, error) {
 			return nil, e
 		}
 		q = filepath.Clean(q)
+		if isTrashPath(q) {
+			return nil, errors.New("the trash folder cannot be selected")
+		}
+		if resolved, err := filepath.EvalSymlinks(q); err == nil && isTrashPath(resolved) {
+			return nil, errors.New("the trash folder cannot be selected")
+		}
 		good := false
 		for _, base := range a.allowed {
 			rel, e := filepath.Rel(base, q)
@@ -512,6 +520,8 @@ func (a *app) addRoot(w http.ResponseWriter, r *http.Request) {
 	if !a.authed(w, r) {
 		return
 	}
+	a.libraryMu.Lock()
+	defer a.libraryMu.Unlock()
 	var x struct{ Path string }
 	if body(r, &x) != nil {
 		http.Error(w, "bad request", 400)
@@ -545,6 +555,8 @@ func (a *app) deleteRoot(w http.ResponseWriter, r *http.Request) {
 	if !a.authed(w, r) {
 		return
 	}
+	a.libraryMu.Lock()
+	defer a.libraryMu.Unlock()
 	key := strings.TrimPrefix(r.URL.Path, "/api/roots/")
 	a.st.mu.Lock()
 	defer a.st.mu.Unlock()
@@ -597,7 +609,7 @@ func (a *app) loadCatalog() {
 			}
 		}
 	}
-	a.items = items
+	a.items = a.withoutTrash(items, true)
 }
 
 func (a *app) importLegacyCatalog() []Item {
@@ -642,6 +654,13 @@ func (a *app) beginScan() bool {
 }
 
 func (a *app) runScan(ctx context.Context) {
+	a.libraryMu.Lock()
+	locked := true
+	defer func() {
+		if locked {
+			a.libraryMu.Unlock()
+		}
+	}()
 	defer func() {
 		a.scanMu.Lock()
 		a.scanning = false
@@ -683,6 +702,10 @@ func (a *app) runScan(ctx context.Context) {
 			return true
 		}
 		walkErr := filepath.WalkDir(root.Path, func(path string, d fs.DirEntry, e error) error {
+			if ctx.Err() != nil {
+				rootFailed = true
+				return fs.SkipAll
+			}
 			if e != nil {
 				rootFailed = true
 				a.addScanError(fmt.Sprintf("%s: %v", root.Name, e))
@@ -692,6 +715,12 @@ func (a *app) runScan(ctx context.Context) {
 				return nil
 			}
 			if d.IsDir() {
+				if isTrashPath(path) {
+					return fs.SkipDir
+				}
+				return nil
+			}
+			if d.Type()&os.ModeSymlink != 0 || isTrashPath(path) {
 				return nil
 			}
 			k := kind(d.Name())
@@ -700,6 +729,9 @@ func (a *app) runScan(ctx context.Context) {
 			}
 			info, e := d.Info()
 			if e != nil {
+				return nil
+			}
+			if !info.Mode().IsRegular() {
 				return nil
 			}
 			rel, e := filepath.Rel(root.Path, path)
@@ -754,10 +786,14 @@ func (a *app) runScan(ctx context.Context) {
 		return
 	}
 	a.scanMu.Lock()
-	a.items = found
+	a.items = a.withoutTrash(found, false)
+	a.duplicateGroups = nil
 	a.scanDone = len(found)
 	a.scanTotal = len(found)
 	a.scanMu.Unlock()
+	a.libraryMu.Unlock()
+	locked = false
+	a.refreshDuplicateGroups(ctx)
 }
 
 func mediaDimensions(path, mediaKind string) (int, int) {
@@ -859,14 +895,37 @@ func (a *app) media(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	filter := r.URL.Query().Get("filter")
+	condition := r.URL.Query().Get("condition")
+	// Keep requests from older cached clients compatible with the split filters.
+	if filter == "duplicates" {
+		filter = ""
+		if !r.URL.Query().Has("condition") {
+			condition = "duplicates"
+		}
+	}
+	duplicatesOnly := condition == "duplicates"
 	sortBy := r.URL.Query().Get("sort")
 	subSort := r.URL.Query().Get("subsort")
 	order := r.URL.Query().Get("order")
 	a.scanMu.Lock()
 	items := append([]Item(nil), a.items...)
+	var groups map[string]string
+	if duplicatesOnly {
+		groups = make(map[string]string, len(a.duplicateGroups))
+		for id, group := range a.duplicateGroups {
+			groups[id] = group
+		}
+	}
 	a.scanMu.Unlock()
+	var counts map[string]int
+	if duplicatesOnly {
+		counts = duplicateCounts(items, groups)
+	}
 	out := items[:0]
 	for _, x := range items {
+		if isTrashPath(x.Path) || (duplicatesOnly && counts[groups[x.ID]] < 2) {
+			continue
+		}
 		if filter == "video" && x.Kind != "video" {
 			continue
 		}
@@ -876,6 +935,11 @@ func (a *app) media(w http.ResponseWriter, r *http.Request) {
 		out = append(out, x)
 	}
 	sortItems(out, sortBy, order, r.URL.Query().Get("seed"), subSort)
+	if duplicatesOnly {
+		// Preserve the requested order within groups, and the first occurrence's
+		// order between groups. Pagination happens after grouping.
+		out = groupDuplicateItems(out, groups)
+	}
 	total := len(out)
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
@@ -970,7 +1034,16 @@ func (a *app) mediaByID(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	a.scanMu.Unlock()
-	if it == nil {
+	if it == nil || isTrashPath(it.Path) {
+		http.NotFound(w, r)
+		return
+	}
+	if len(parts) == 2 && parts[1] == "trash" {
+		a.trashMedia(w, r, it.ID)
+		return
+	}
+	// An old thumbnail must not remain accessible after the source is moved.
+	if _, err := os.Stat(it.Path); errors.Is(err, os.ErrNotExist) {
 		http.NotFound(w, r)
 		return
 	}
@@ -1401,6 +1474,8 @@ func (a *app) settingsRoots(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "入力を読み取れませんでした。", http.StatusBadRequest)
 		return
 	}
+	a.libraryMu.Lock()
+	defer a.libraryMu.Unlock()
 	a.st.mu.RLock()
 	existing := append([]Root(nil), a.st.Roots...)
 	a.st.mu.RUnlock()
@@ -1477,16 +1552,20 @@ func (a *app) reset(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid password", 401)
 		return
 	}
+	a.libraryMu.Lock()
+	defer a.libraryMu.Unlock()
 	a.st.mu.Lock()
 	a.st.Settings = Settings{Shortcuts: defaults()}
 	_ = a.st.save()
 	a.st.mu.Unlock()
 	a.scanMu.Lock()
 	a.items = nil
+	a.duplicateGroups = nil
 	a.scanErrors = nil
 	a.scanMu.Unlock()
 	_ = replaceIndexedItems(a.db, nil)
 	_ = clearStagedScans(a.db)
+	_, _ = a.db.Exec(`DELETE FROM content_hashes`)
 	_ = os.Remove(a.catalogFile)
 	if entries, err := os.ReadDir(a.cacheDir); err == nil {
 		for _, entry := range entries {

@@ -113,12 +113,13 @@ function updateGalleryItems(append = false) {
   }
   const sortLabels = {captured: t('captured'), created: t('created'), modified: t('modified'), name: t('name'), random: t('random')};
   const filterLabels = {'': t('all'), image: t('images'), video: t('videos')};
+  const filterConditionLabel = state.filterCondition === 'duplicates' ? ` · ${t('duplicates')}` : '';
   const subSortLabel = state.subSort === 'same-day-name' && ['captured', 'created', 'modified'].includes(state.sort)
     ? ` · ${t('sameDayName')}` : '';
   $('#selection-summary').textContent =
     `${sortLabels[state.sort]}${state.sort === 'random' ? '' : ` · ${state.order === 'asc' ? t('ascending') : t('descending')}`}${subSortLabel} / ` +
     `${state.layout === 'river' ? t('river') : t('square')} · ${{small:t('small'),medium:t('medium'),large:t('large')}[state.size]} / ` +
-    `${filterLabels[state.filter]} · ${state.total}`;
+    `${filterLabels[state.filter]}${filterConditionLabel} · ${state.total}`;
 }
 
 function tileHTML(item) {
@@ -211,9 +212,11 @@ function connectGalleryShell() {
     updateGalleryItems(false);
   });
   $('#filter-menu').onclick = () => optionDialog(t('filter'), [
-    [t('mediaType'), 'filter', [[t('all'), ''], [t('images'), 'image'], [t('videos'), 'video']]]
-  ], {filter: state.filter}, draft => {
+    [t('mediaType'), 'filter', [[t('all'), ''], [t('images'), 'image'], [t('videos'), 'video']]],
+    [t('filterCondition'), 'filterCondition', [[t('noFilterCondition'), ''], [t('duplicates'), 'duplicates']]]
+  ], {filter: state.filter, filterCondition: state.filterCondition}, draft => {
     state.filter = draft.filter;
+    state.filterCondition = draft.filterCondition;
     savePreferences();
     return refreshGalleryItems();
   });

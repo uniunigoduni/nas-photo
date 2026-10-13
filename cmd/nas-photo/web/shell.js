@@ -137,6 +137,7 @@ async function loadSettings() {
 function queryString(offset = 0) {
   return new URLSearchParams({
     sort: state.sort, subsort: state.subSort, order: state.order, seed: state.randomSeed, filter: state.filter,
+    condition: state.filterCondition,
     offset: String(offset), limit: '200'
   }).toString();
 }

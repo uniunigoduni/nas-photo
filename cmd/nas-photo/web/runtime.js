@@ -26,6 +26,7 @@ function installTooltipSystem() {
 }
 
 document.addEventListener('keydown', event => {
+  if ($$('m3e-dialog').some(dialog => dialog.open)) return;
   if (['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)) return;
   const action = Object.entries(state.shortcuts).find(([, code]) => code === event.code)?.[0];
   if (action === 'splitToggle') {

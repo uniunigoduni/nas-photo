@@ -172,6 +172,10 @@ function connectViewerPane(root, preserveControls = false) {
     event.stopPropagation();
     leaveViewerWithTransition();
   });
+  $('.trash-media', root)?.addEventListener('click', event => {
+    event.stopPropagation();
+    confirmTrashMedia(state.viewer[Number(pane.dataset.pane)]);
+  });
   $('.add-pane', root)?.addEventListener('click', event => {
     event.stopPropagation();
     toggleSplit();
@@ -190,6 +194,64 @@ function leaveViewer() {
   document.body.classList.remove('viewer-open');
   state.viewerTransitionSourceId = null;
   requestAnimationFrame(() => window.scrollTo(0, scrollY));
+}
+
+const mediaLibraryChannel = typeof BroadcastChannel === 'function'
+  ? new BroadcastChannel('nas-photo-library') : null;
+
+async function applyTrashedMedia(id) {
+  if (state.viewer[0] === id) {
+    if (state.split) state.viewer[0] = null;
+    else leaveViewer();
+  }
+  if ($('#gallery')) {
+    try {
+      await refreshGalleryItems();
+    } catch (reason) {
+      const status = $('#job-status');
+      if (status) {
+        status.hidden = false;
+        status.textContent = reason.message;
+      }
+    }
+  }
+}
+
+if (mediaLibraryChannel) {
+  mediaLibraryChannel.onmessage = event => {
+    if (event.data?.type === 'mediaTrashed') void applyTrashedMedia(String(event.data.id));
+  };
+}
+
+function confirmTrashMedia(id) {
+  if (!id || $$('m3e-dialog').some(dialog => dialog.open)) return;
+  hideTooltip();
+  const dialog = createMaterialDialogShell('option-dialog trash-dialog', t('trashConfirm'));
+  renderMaterialDialog(dialog, t('trashConfirm'), '<p class="error" hidden></p>', `
+    <m3e-button variant="text" id="trash-no" autofocus>${t('no')}</m3e-button>
+    <m3e-button variant="filled" id="trash-yes">${t('yes')}</m3e-button>`);
+  $('#trash-no', dialog).onclick = () => closeMaterialDialog(dialog);
+  $('#trash-yes', dialog).onclick = async () => {
+    const yes = $('#trash-yes', dialog);
+    const no = $('#trash-no', dialog);
+    yes.disabled = true;
+    no.disabled = true;
+    dialog.disableClose = true;
+    try {
+      await api(`/api/media/${encodeURIComponent(id)}/trash`, {method:'POST'});
+      closeMaterialDialog(dialog);
+      mediaLibraryChannel?.postMessage({type:'mediaTrashed', id});
+      await applyTrashedMedia(id);
+    } catch {
+      const error = $('.error', dialog);
+      error.hidden = false;
+      error.textContent = t('trashError');
+      yes.disabled = false;
+      no.disabled = false;
+      dialog.disableClose = false;
+    }
+  };
+  openMaterialDialog(dialog);
 }
 
 function paneHTML(id, index) {
@@ -222,6 +284,7 @@ function paneHTML(id, index) {
       <div class="swipe-slide swipe-slide-next" data-available="${Boolean(next)}">${swipePreviewHTML(next)}</div>
     </div><div class="controls">
       <m3e-icon-button variant="tonal" size="small" class="close-viewer" aria-label="${t('backGallery')}" data-tooltip="${t('backGallery')}" data-shortcut-label="Esc"><m3e-icon name="close"></m3e-icon></m3e-icon-button>
+      <m3e-icon-button variant="tonal" size="small" class="trash-media" aria-label="${t('trashMedia')}" data-tooltip="${t('trashMedia')}"><m3e-icon name="delete"></m3e-icon></m3e-icon-button>
       ${!embeddedMode && index === 0 && innerWidth >= 768 && !state.split ? `<m3e-icon-button variant="tonal" size="small" class="add-pane" aria-label="${t('splitToggle')}" data-tooltip="${t('addSplit')}" data-shortcut-action="splitToggle"><m3e-icon name="add"></m3e-icon></m3e-icon-button>` : ''}
       <m3e-icon-button variant="tonal" size="small" class="previous" aria-label="${t('previous')}" data-tooltip="${t('previous')}" data-shortcut-action="${previousAction}"><m3e-icon name="arrow_back"></m3e-icon></m3e-icon-button>
       <m3e-icon-button variant="tonal" size="small" class="next" aria-label="${t('next')}" data-tooltip="${t('next')}" data-shortcut-action="${nextAction}"><m3e-icon name="arrow_forward"></m3e-icon></m3e-icon-button>

@@ -18,7 +18,7 @@
       destination: value => `Destination: ${value}`,
       uploading: (done, total) => `Uploading ${done} / ${total}`,
       committing: 'All files received. Saving the batch to the NAS…',
-      completed: count => `Upload complete · ${count} files`,
+      completed: (count, skipped = 0) => `Upload complete · ${count} saved${skipped ? ` · ${skipped} duplicates skipped` : ''}`,
       interrupted: 'Upload was interrupted. Received files are kept temporarily for up to 1 hour.',
       commitFailed: 'The files reached this server, but saving them to the NAS failed. You can retry without re-uploading.',
       retry: 'Retry',
@@ -38,7 +38,7 @@
       destination: value => `保存先: ${value}`,
       uploading: (done, total) => `アップロード中 ${done} / ${total}`,
       committing: '全ファイルを受信しました。NASへまとめて保存しています…',
-      completed: count => `アップロード完了 · ${count}件`,
+      completed: (count, skipped = 0) => `アップロード完了 · 保存${count}件${skipped ? `・重複${skipped}件をスキップ` : ''}`,
       interrupted: 'アップロードが中断されました。受信済みファイルは最大1時間、一時保存されます。',
       commitFailed: 'サーバーへの受信は完了しましたが、NASへの保存に失敗しました。再アップロードせずに再試行できます。',
       retry: '再試行',
@@ -443,7 +443,7 @@
       setProgress(1);
       session.finished = true;
       session.failed = false;
-      showPanel(msg('completed', session.batch.files.length), msg('destination', session.batch.destination));
+      showPanel(msg('completed', session.batch.savedCount ?? session.batch.files.length, session.batch.skippedCount || 0), msg('destination', session.batch.destination));
       setActions({retry: false, discard: false, close: true});
       setTimeout(() => {
         if (typeof window.boot === 'function') window.boot().catch?.(() => {});

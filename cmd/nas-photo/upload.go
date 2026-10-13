@@ -38,12 +38,14 @@ const (
 )
 
 type uploadFile struct {
-	Index      int    `json:"index"`
-	Name       string `json:"name"`
-	SourcePath string `json:"sourcePath"`
-	Size       int64  `json:"size"`
-	Uploaded   bool   `json:"uploaded"`
-	TargetName string `json:"targetName,omitempty"`
+	Skipped       bool `json:"skipped,omitempty"`
+	duplicatePath string
+	Index         int    `json:"index"`
+	Name          string `json:"name"`
+	SourcePath    string `json:"sourcePath"`
+	Size          int64  `json:"size"`
+	Uploaded      bool   `json:"uploaded"`
+	TargetName    string `json:"targetName,omitempty"`
 }
 
 type uploadBatch struct {
@@ -59,6 +61,7 @@ type uploadBatch struct {
 }
 
 type uploadFileView struct {
+	Skipped    bool   `json:"skipped,omitempty"`
 	Index      int    `json:"index"`
 	Name       string `json:"name"`
 	SourcePath string `json:"sourcePath"`
@@ -68,6 +71,8 @@ type uploadFileView struct {
 }
 
 type uploadBatchView struct {
+	SavedCount     int              `json:"savedCount"`
+	SkippedCount   int              `json:"skippedCount"`
 	ID             string           `json:"id"`
 	State          string           `json:"state"`
 	CreatedAt      time.Time        `json:"createdAt"`
@@ -460,6 +465,8 @@ func (a *app) commitUploadBatch(w http.ResponseWriter, batchID string) {
 		http.Error(w, "upload batch is incomplete", http.StatusConflict)
 		return
 	}
+	a.libraryMu.Lock()
+	defer a.libraryMu.Unlock()
 	if !a.uploadRootStillConfigured(batch.RootPath) {
 		batch.State = uploadStateCommitFailed
 		batch.LastActivityAt = time.Now()
@@ -505,6 +512,11 @@ func (a *app) commitUploadBatch(w http.ResponseWriter, batchID string) {
 		http.Error(w, "could not create upload destination", http.StatusInternalServerError)
 		return
 	}
+	if err := a.markDuplicateUploads(context.Background(), batch, destinationDir); err != nil {
+		a.failUploadCommit(batch, err)
+		http.Error(w, "could not check uploaded files for duplicates", http.StatusInternalServerError)
+		return
+	}
 	if err := planUploadTargetNames(destinationDir, batch); err != nil {
 		a.failUploadCommit(batch, err)
 		http.Error(w, "could not plan upload destination names", http.StatusInternalServerError)
@@ -519,6 +531,11 @@ func (a *app) commitUploadBatch(w http.ResponseWriter, batchID string) {
 	staged := make(map[int]string)
 	for i := range batch.Files {
 		file := &batch.Files[i]
+		if file.Skipped {
+			commitDone += file.Size
+			setUploadCommitProgress(batch.ID, commitDone, commitTotal, true)
+			continue
+		}
 		finalPath := filepath.Join(destinationDir, file.TargetName)
 		partPath, _, _ := uploadPartPaths(batch.ID, i)
 		if _, statErr := os.Stat(finalPath); statErr == nil {
@@ -585,6 +602,11 @@ func (a *app) commitUploadBatch(w http.ResponseWriter, batchID string) {
 		delete(staged, i)
 	}
 
+	if err := verifySkippedUploads(batch, destinationDir); err != nil {
+		a.failUploadCommit(batch, err)
+		http.Error(w, "a duplicate changed during upload; retry saving", http.StatusConflict)
+		return
+	}
 	batch.State = uploadStateCompleted
 	batch.LastActivityAt = time.Now()
 	batch.Error = ""
@@ -850,13 +872,19 @@ func validateUploadBatch(batch *uploadBatch, expectedID string) error {
 
 func uploadBatchResponse(batch *uploadBatch) uploadBatchView {
 	files := make([]uploadFileView, len(batch.Files))
+	skipped := 0
 	for i, file := range batch.Files {
+		if file.Skipped {
+			skipped++
+		}
 		files[i] = uploadFileView{
-			Index: file.Index, Name: file.Name, SourcePath: file.SourcePath, Size: file.Size,
+			Skipped: file.Skipped,
+			Index:   file.Index, Name: file.Name, SourcePath: file.SourcePath, Size: file.Size,
 			Uploaded: file.Uploaded, TargetName: file.TargetName,
 		}
 	}
 	return uploadBatchView{
+		SavedCount: len(batch.Files) - skipped, SkippedCount: skipped,
 		ID: batch.ID, State: batch.State, CreatedAt: batch.CreatedAt, LastActivityAt: batch.LastActivityAt,
 		ExpiresAt: batch.LastActivityAt.Add(uploadBatchTTL), DateFolder: batch.DateFolder, RootName: batch.RootName,
 		Destination: filepath.ToSlash(filepath.Join(uploadDestinationDirName, batch.DateFolder)), Files: files, Error: batch.Error,
@@ -883,6 +911,9 @@ func planUploadTargetNames(destinationDir string, batch *uploadBatch) error {
 	reserved := map[string]bool{}
 	for i := range batch.Files {
 		file := &batch.Files[i]
+		if file.Skipped {
+			continue
+		}
 		if file.TargetName != "" {
 			finalPath := filepath.Join(destinationDir, file.TargetName)
 			if _, err := os.Stat(finalPath); err == nil {
@@ -1026,14 +1057,25 @@ func uploadFilesEqual(leftPath, rightPath string, expectedSize int64) (bool, err
 	leftBuffer := make([]byte, 64*1024)
 	rightBuffer := make([]byte, len(leftBuffer))
 	for {
-		leftN, leftErr := left.Read(leftBuffer)
-		rightN, rightErr := right.Read(rightBuffer)
+		leftN, leftErr := io.ReadFull(left, leftBuffer)
+		rightN, rightErr := io.ReadFull(right, rightBuffer)
 		if leftN != rightN || !bytes.Equal(leftBuffer[:leftN], rightBuffer[:rightN]) {
 			return false, nil
 		}
 		if leftErr != nil || rightErr != nil {
-			if errors.Is(leftErr, io.EOF) && errors.Is(rightErr, io.EOF) {
-				return true, nil
+			leftEnd := errors.Is(leftErr, io.EOF) || errors.Is(leftErr, io.ErrUnexpectedEOF)
+			rightEnd := errors.Is(rightErr, io.EOF) || errors.Is(rightErr, io.ErrUnexpectedEOF)
+			if leftEnd && rightEnd {
+				leftAfter, err := left.Stat()
+				if err != nil {
+					return false, err
+				}
+				rightAfter, err := right.Stat()
+				if err != nil {
+					return false, err
+				}
+				return leftAfter.Size() == expectedSize && rightAfter.Size() == expectedSize &&
+					leftAfter.ModTime().Equal(leftInfo.ModTime()) && rightAfter.ModTime().Equal(rightInfo.ModTime()), nil
 			}
 			if leftErr != nil && !errors.Is(leftErr, io.EOF) {
 				return false, leftErr

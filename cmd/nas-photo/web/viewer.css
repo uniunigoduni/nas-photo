@@ -225,6 +225,11 @@ body.viewer-open {
   left: max(14px, env(safe-area-inset-left));
 }
 
+.trash-media {
+  top: max(14px, env(safe-area-inset-top));
+  left: calc(max(14px, env(safe-area-inset-left)) + 48px);
+}
+
 .add-pane {
   top: max(14px, env(safe-area-inset-top));
   right: max(14px, env(safe-area-inset-right));

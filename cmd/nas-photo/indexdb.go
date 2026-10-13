@@ -54,6 +54,12 @@ CREATE TABLE IF NOT EXISTS scan_entries (
 	PRIMARY KEY(scan_id, id)
 );
 CREATE INDEX IF NOT EXISTS scan_entries_root ON scan_entries(scan_id, root_id);
+CREATE TABLE IF NOT EXISTS content_hashes (
+	id TEXT PRIMARY KEY,
+	size INTEGER NOT NULL,
+	modified_ns INTEGER NOT NULL,
+	digest TEXT NOT NULL
+);
 `)
 	if err != nil {
 		db.Close()
