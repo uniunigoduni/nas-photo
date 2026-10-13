@@ -122,7 +122,7 @@ function showLogin(foldersRequired = false, notice = '') {
       const status = await api('/api/bootstrap/status');
       if (status.foldersRequired) return showFolderSetup();
       await loadSettings();
-      showGallery();
+      await showInitialGallery();
     } catch {
       $('.error').textContent = t('loginError');
     }

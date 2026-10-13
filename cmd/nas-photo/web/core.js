@@ -40,7 +40,7 @@ const messages = {
     thumbnailWorking:'Generating thumbnails…', thumbnailCleanupWorking:'Checking thumbnail cache…',
     leftFrame:'Left NAS-PHOTO screen', rightFrame:'Right NAS-PHOTO screen',
     endSplit:'End split view', selectRightMedia:'Select media for this screen', mediaError:'Could not load this media.',
-    backGallery:'Back to gallery', addSplit:'Add an independent screen on the right',
+    backGallery:'Back to gallery', addSplit:'Open a copy of this view on the right',
     previous:'Show previous media', next:'Show next media', loopTip:'Toggle video looping', muteTip:'Mute or unmute video audio',
     backSettings:'Back to settings', backGalleryButton:'Back to gallery', logout:'Sign out',
     shortcutSettings:'Keyboard shortcuts', shortcutSummary:'Review and customize',
@@ -93,7 +93,7 @@ const messages = {
     thumbnailWorking:'サムネイルを生成しています…', thumbnailCleanupWorking:'サムネイルキャッシュを確認しています…',
     leftFrame:'左側のNAS-PHOTO画面', rightFrame:'右側のNAS-PHOTO画面',
     endSplit:'画面分割を解除', selectRightMedia:'右画面のメディアを選択', mediaError:'メディアを読み込めません。',
-    backGallery:'一覧へ戻る', addSplit:'独立した画面を右側に追加',
+    backGallery:'一覧へ戻る', addSplit:'現在の表示状態を右側に引き継いで分割',
     previous:'前のメディアを表示', next:'次のメディアを表示', loopTip:'動画のループ再生を切り替え', muteTip:'動画の音声をミュートまたは解除',
     backSettings:'設定へ戻る', backGalleryButton:'一覧へ戻る', logout:'ログアウト',
     shortcutSettings:'キーボードショートカット', shortcutSummary:'確認と再設定',
@@ -157,6 +157,9 @@ const state = {
   muted: stored.muted ?? false,
   viewer: [null, null],
   split: false,
+  splitViewStates: null,
+  splitTransition: false,
+  viewReady: false,
   activePane: 0,
   shortcuts: {...DEFAULT_SHORTCUTS},
   galleryToken: 0,
@@ -235,12 +238,20 @@ async function boot() {
     await api('/api/auth/me');
     if (status.foldersRequired) return showFolderSetup();
     await loadSettings();
-    await showGallery();
-    if (embeddedMode && initialMediaId) await openInitialMedia();
+    await showInitialGallery();
     return;
   } catch {
     return showLogin(status.foldersRequired);
   }
+}
+
+async function showInitialGallery() {
+  const viewState = readEmbeddedViewState();
+  applyViewPreferences(viewState);
+  await showGallery();
+  if (viewState) await restoreViewState(viewState);
+  else if (embeddedMode && initialMediaId) await openInitialMedia();
+  state.viewReady = true;
 }
 
 async function openInitialMedia() {

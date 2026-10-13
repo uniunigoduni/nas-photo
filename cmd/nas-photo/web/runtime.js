@@ -148,8 +148,7 @@ window.addEventListener('message', event => {
 window.addEventListener('resize', () => {
   scheduleRiverLayout();
   if (innerWidth < 768 && state.split) {
-    state.split = false;
-    if (state.viewer[0]) renderViewer(); else leaveViewer();
+    void collapseSplit();
   }
   requestAnimationFrame(constrainVisibleViewerZoom);
 });

@@ -119,11 +119,11 @@ function renderViewer() {
   layer.innerHTML = split
     ? `<main class="viewer is-split">
         <iframe class="split-window split-window-primary" data-role="primary"
-          src="${embeddedURL('primary', state.viewer[0])}" title="${t('leftFrame')}"></iframe>
+          src="${embeddedURL('primary', state.splitViewStates?.primary)}" title="${t('leftFrame')}"></iframe>
         <div class="split-divider"><m3e-icon-button variant="tonal" size="small" class="end-split" aria-label="${t('endSplit')}"
           data-tooltip="${t('endSplit')}" data-shortcut-action="splitToggle"><m3e-icon name="close"></m3e-icon></m3e-icon-button></div>
         <iframe class="split-window split-window-secondary" data-role="secondary"
-          src="${embeddedURL('secondary')}" title="${t('rightFrame')}"></iframe>
+          src="${embeddedURL('secondary', state.splitViewStates?.secondary)}" title="${t('rightFrame')}"></iframe>
       </main>`
     : `<main class="viewer" role="dialog" aria-modal="true">
         <div class="split-surface"></div>
@@ -136,24 +136,33 @@ function renderViewer() {
 }
 
 function toggleSplit() {
+  if (state.splitTransition) return;
   if (embeddedMode) {
     parent.postMessage({type:'toggleSplit'}, location.origin);
     return;
   }
   if (state.split) {
-    state.split = false;
-    if (state.viewer[0]) renderViewer(); else leaveViewer();
+    void collapseSplit();
     return;
   }
   if (!state.viewer[0] || innerWidth < 768) return;
+  state.splitViewStates = {
+    primary: captureViewState({preservePlaybackPosition:true}),
+    secondary: captureViewState()
+  };
+  applyViewPreferences(state.splitViewStates.primary);
+  state.zoomAnimationCancel[0]?.();
+  state.zoomAnimationCancel[0] = null;
+  $('.viewer video')?.pause();
   state.split = true;
   renderViewer();
 }
 
-function embeddedURL(role, media = '') {
+function embeddedURL(role, snapshot = null) {
   const params = new URLSearchParams({embedded:'1', role});
+  const media = snapshot?.media || (role === 'primary' ? state.viewer[0] : '');
   if (media) params.set('media', media);
-  return `/?${params}`;
+  return `/?${params}${snapshot ? `#view=${encodeURIComponent(JSON.stringify(snapshot))}` : ''}`;
 }
 
 function updateViewerPane(surface, paneIndex, retainedPreview = null, preserveControls = false) {
@@ -190,6 +199,7 @@ function leaveViewer() {
   state.viewer[0] = null;
   state.viewer[1] = null;
   state.split = false;
+  state.splitViewStates = null;
   $('.viewer-layer', app)?.remove();
   document.body.classList.remove('viewer-open');
   state.viewerTransitionSourceId = null;
