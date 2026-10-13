@@ -29,14 +29,6 @@
   display: block;
 }
 
-.gallery.river.river-pending {
-  visibility: hidden;
-}
-
-.gallery.river > .tile {
-  visibility: hidden;
-}
-
 .gallery.river.size-small {
   --river-target-height: 125px;
 }

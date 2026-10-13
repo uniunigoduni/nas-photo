@@ -607,17 +607,91 @@ func (a *app) commitUploadBatch(w http.ResponseWriter, batchID string) {
 		http.Error(w, "a duplicate changed during upload; retry saving", http.StatusConflict)
 		return
 	}
+	if err := a.indexUploadedBatch(batch, destinationDir); err != nil {
+		a.failUploadCommit(batch, err)
+		http.Error(w, "could not index uploaded media", http.StatusInternalServerError)
+		return
+	}
 	batch.State = uploadStateCompleted
 	batch.LastActivityAt = time.Now()
 	batch.Error = ""
 	setUploadCommitProgress(batch.ID, commitTotal, commitTotal, true)
 	view := uploadBatchResponse(batch)
 	_ = saveUploadBatch(batch)
-	a.scheduleUploadRescan()
+	a.scheduleRescan()
 	if err := os.RemoveAll(uploadBatchDir(batch.ID)); err != nil {
 		a.log.Warn("could not remove completed upload batch", "batch", batch.ID, "error", err)
 	}
 	jsonOut(w, map[string]any{"ok": true, "batch": view})
+}
+
+// Called with libraryMu held, so a scan cannot replace the index while publishing.
+func (a *app) indexUploadedBatch(batch *uploadBatch, destinationDir string) error {
+	a.st.mu.RLock()
+	var root Root
+	for _, candidate := range a.st.Roots {
+		if candidate.Path == batch.RootPath {
+			root = candidate
+			break
+		}
+	}
+	a.st.mu.RUnlock()
+	if root.Path == "" {
+		return errors.New("upload destination is no longer configured")
+	}
+
+	items := make([]Item, 0, len(batch.Files))
+	for _, file := range batch.Files {
+		if file.Skipped {
+			continue
+		}
+		path := filepath.Join(destinationDir, file.TargetName)
+		info, err := os.Stat(path)
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root.Path, path)
+		if err != nil {
+			return err
+		}
+		mediaKind := kind(file.TargetName)
+		width, height := 0, 0
+		if mediaKind != "video" {
+			// Read image headers locally; video probing is left to the background scan.
+			partPath, _, err := uploadPartPaths(batch.ID, file.Index)
+			if err != nil {
+				return err
+			}
+			width, height = mediaDimensions(partPath, mediaKind)
+		}
+		items = append(items, Item{
+			ID: stableID(root.ID, rel), RootID: root.ID, Path: path, Name: file.TargetName,
+			Kind: mediaKind, Size: info.Size(), Modified: info.ModTime(), Width: width, Height: height,
+		})
+	}
+	if len(items) == 0 {
+		return nil
+	}
+	if err := upsertIndexedItems(a.db, items); err != nil {
+		// The originals are already saved. Publish them and let the rescan retry persistence.
+		a.log.Warn("could not persist uploaded media index", "batch", batch.ID, "error", err)
+	}
+	a.scanMu.Lock()
+	defer a.scanMu.Unlock()
+	positions := make(map[string]int, len(a.items))
+	for i, item := range a.items {
+		positions[item.ID] = i
+	}
+	for _, item := range items {
+		if position, exists := positions[item.ID]; exists {
+			a.items[position] = item
+		} else {
+			positions[item.ID] = len(a.items)
+			a.items = append(a.items, item)
+		}
+		delete(a.duplicateGroups, item.ID)
+	}
+	return nil
 }
 
 func (a *app) deleteUploadBatch(w http.ResponseWriter, batchID string) {
@@ -1210,7 +1284,7 @@ func (a *app) uploadCleanupLoop() {
 	}
 }
 
-func (a *app) scheduleUploadRescan() {
+func (a *app) scheduleRescan() {
 	a.uploadRescanMu.Lock()
 	a.uploadRescanPending = true
 	if a.uploadRescanRunning {

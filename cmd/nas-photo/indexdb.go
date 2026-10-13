@@ -115,6 +115,33 @@ func replaceIndexedItems(db *sql.DB, items []Item) error {
 	return tx.Commit()
 }
 
+func upsertIndexedItems(db *sql.DB, items []Item) error {
+	if db == nil || len(items) == 0 {
+		return nil
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	stmt, err := tx.Prepare(`
+INSERT INTO media_items(id,root_id,path,name,kind,size,modified_ns,width,height)
+VALUES(?,?,?,?,?,?,?,?,?)
+ON CONFLICT(id) DO UPDATE SET
+	root_id=excluded.root_id,path=excluded.path,name=excluded.name,kind=excluded.kind,
+	size=excluded.size,modified_ns=excluded.modified_ns,width=excluded.width,height=excluded.height`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for _, item := range items {
+		if _, err = stmt.Exec(item.ID, item.RootID, item.Path, item.Name, item.Kind, item.Size, item.Modified.UnixNano(), item.Width, item.Height); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 func stageIndexedItems(db *sql.DB, scanID string, items []Item) error {
 	tx, err := db.Begin()
 	if err != nil {

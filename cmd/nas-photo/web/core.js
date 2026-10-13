@@ -156,6 +156,8 @@ const state = {
   loop: stored.loop ?? true,
   muted: stored.muted ?? false,
   viewer: [null, null],
+  viewerItems: [null, null],
+  viewerNeighbors: [{previous: null, next: null}, {previous: null, next: null}],
   split: false,
   splitViewStates: null,
   splitTransition: false,
@@ -163,6 +165,8 @@ const state = {
   activePane: 0,
   shortcuts: {...DEFAULT_SHORTCUTS},
   galleryToken: 0,
+  galleryQuery: '',
+  galleryRefreshRequest: null,
   galleryLayoutFrame: 0,
   galleryObserver: null,
   galleryWidth: 0,
@@ -170,6 +174,8 @@ const state = {
   pageLoadRequest: null,
   thumbnailVersion: 0,
   pollTimer: null,
+  scanMonitorToken: 0,
+  scanWatch: {scan: false, thumbnails: false, cleanup: false},
   controlsTimer: null,
   controlsHideAt: 0,
   viewerScrollY: 0,
@@ -204,6 +210,16 @@ function savePreferences() {
     filterCondition: state.filterCondition,
     layout: state.layout, size: state.size, loop: state.loop, muted: state.muted
   }));
+}
+
+function mediaThumbnailURL(item) {
+  const params = new URLSearchParams({v: mediaContentVersion(item)});
+  if (state.thumbnailVersion) params.set('generation', String(state.thumbnailVersion));
+  return `/api/media/${item.id}/thumbnail?${params}`;
+}
+
+function mediaContentVersion(item) {
+  return `${item.size || 0}-${item.modified || ''}`;
 }
 
 async function api(path, options = {}) {

@@ -445,9 +445,9 @@
       session.failed = false;
       showPanel(msg('completed', session.batch.savedCount ?? session.batch.files.length, session.batch.skippedCount || 0), msg('destination', session.batch.destination));
       setActions({retry: false, discard: false, close: true});
-      setTimeout(() => {
-        if (typeof window.boot === 'function') window.boot().catch?.(() => {});
-      }, 750);
+      if (document.querySelector('#gallery') && typeof window.refreshGalleryItems === 'function') {
+        window.refreshGalleryItems({broadcast: true}).catch(() => {});
+      }
     } catch (error) {
       session.failed = true;
       showPanel(msg('commitFailed'), error.message);

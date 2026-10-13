@@ -123,7 +123,7 @@ async function renderRootSettings(dialog) {
       try {
         await api('/api/settings/roots', {method:'PATCH', body:JSON.stringify({paths:draft.map(root => root.path)})});
         renderSettingsHome(dialog);
-        setTimeout(() => monitorScan(state.galleryToken), 250);
+        monitorScan(state.galleryToken, true);
       } catch (reason) { $('.error', dialog).textContent = reason.message; }
     };
   };

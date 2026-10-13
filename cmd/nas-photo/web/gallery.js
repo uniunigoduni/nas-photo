@@ -1,6 +1,18 @@
 async function showGallery() {
+  if ($('#gallery')) {
+    updateGalleryLabels();
+    updateGalleryItems();
+    return refreshGalleryItems();
+  }
   const token = ++state.galleryToken;
   clearTimeout(state.pollTimer);
+  state.galleryRefreshRequest?.controller.abort();
+  state.galleryRefreshRequest = null;
+  state.scanMonitorToken++;
+  state.scanWatch = {scan: false, thumbnails: false, cleanup: false};
+  state.galleryObserver?.disconnect();
+  state.galleryObserver = null;
+  state.galleryQuery = queryString();
   document.body.classList.remove('viewer-open');
   state.items = [];
   state.nextOffset = 0;
@@ -29,23 +41,54 @@ async function showGallery() {
   }
 }
 
-async function refreshGalleryItems() {
-  const token = ++state.galleryToken;
-  state.items = [];
-  state.nextOffset = 0;
-  state.pageLoadRequest = null;
-  await loadPage(0, token);
-  void loadRemainingPages(token);
-  monitorScan(token);
+async function refreshGalleryItems({broadcast = false} = {}) {
+  const gallery = $('#gallery');
+  if (!gallery) return;
+  state.galleryRefreshRequest?.controller.abort();
+  const request = {controller: new AbortController(), query: queryString()};
+  state.galleryRefreshRequest = request;
+  const params = new URLSearchParams(request.query);
+  params.set('snapshot', '1');
+  try {
+    // Keep the published items and DOM usable until the complete replacement is ready.
+    const page = await api(`/api/media?${params}`, {signal: request.controller.signal});
+    if (state.galleryRefreshRequest !== request || $('#gallery') !== gallery) return;
+    const preserveAnchor = state.galleryQuery === request.query;
+    const token = ++state.galleryToken;
+    const previousItems = state.items;
+    state.galleryQuery = request.query;
+    state.items = page.items || [];
+    state.total = page.total || 0;
+    state.nextOffset = -1;
+    state.pageLoadRequest = null;
+    updateGalleryItems(preserveAnchor);
+    syncViewerGalleryItems(previousItems);
+    if (broadcast) mediaLibraryChannel?.postMessage({type: 'libraryChanged'});
+    monitorScan(token);
+  } catch (reason) {
+    if (request.controller.signal.aborted || state.galleryRefreshRequest !== request) return;
+    const status = $('#job-status');
+    if (status && $('#gallery') === gallery) {
+      status.hidden = false;
+      status.textContent = reason.message;
+    }
+    throw reason;
+  } finally {
+    if (state.galleryRefreshRequest === request) state.galleryRefreshRequest = null;
+  }
 }
 
 async function loadPage(offset, token = state.galleryToken) {
-  const page = await api(`/api/media?${queryString(offset)}`);
+  const params = new URLSearchParams(state.galleryQuery || queryString());
+  params.set('offset', String(offset));
+  const page = await api(`/api/media?${params}`);
   if (token !== state.galleryToken) return;
+  const previousItems = state.items;
   state.items = offset === 0 ? (page.items || []) : state.items.concat(page.items || []);
   state.total = page.total || 0;
   state.nextOffset = page.nextOffset;
-  updateGalleryItems(offset > 0);
+  updateGalleryItems();
+  syncViewerGalleryItems(previousItems);
 }
 
 async function loadNextPage(token = state.galleryToken) {
@@ -80,27 +123,108 @@ async function loadRemainingPages(token = state.galleryToken) {
   }
 }
 
-function updateGalleryItems(append = false) {
+function captureGalleryPosition(gallery, ids) {
+  const viewerOpen = document.body.classList.contains('viewer-open');
+  const scrollY = viewerOpen ? state.viewerScrollY : window.scrollY;
+  const viewportTop = scrollY - window.scrollY;
+  let anchor = null;
+  for (const tile of gallery.querySelectorAll('.tile')) {
+    if (ids && !ids.has(tile.dataset.id)) continue;
+    const rect = tile.getBoundingClientRect();
+    if (rect.bottom > viewportTop) {
+      anchor = {tile, offset: rect.top - viewportTop};
+      break;
+    }
+  }
+  return {scrollY, anchor, focus: gallery.contains(document.activeElement) ? document.activeElement : null};
+}
+
+function restoreGalleryPosition(position) {
+  let scrollY = position.scrollY;
+  if (position.anchor?.tile.isConnected) {
+    scrollY = position.anchor.tile.getBoundingClientRect().top + window.scrollY - position.anchor.offset;
+  }
+  if (document.body.classList.contains('viewer-open')) state.viewerScrollY = Math.max(0, scrollY);
+  else if (Math.abs(window.scrollY - scrollY) > 0.5) {
+    window.scrollTo({top: Math.max(0, scrollY), left: window.scrollX, behavior: 'instant'});
+  }
+  if (position.focus?.isConnected && document.activeElement !== position.focus) {
+    position.focus.focus({preventScroll: true});
+  }
+}
+
+function reconcileGalleryChildren(parent, children) {
+  let cursor = parent.firstChild;
+  for (const child of children) {
+    if (child === cursor) cursor = cursor.nextSibling;
+    else parent.insertBefore(child, cursor);
+  }
+  while (cursor) {
+    const next = cursor.nextSibling;
+    cursor.remove();
+    cursor = next;
+  }
+}
+
+function updateGalleryItems(preserveAnchor = true) {
   const gallery = $('#gallery');
   if (!gallery) return;
-  state.galleryObserver?.disconnect();
-  state.galleryObserver = null;
-  state.galleryWidth = 0;
-  const riverPending = state.layout === 'river' && state.items.length && !append;
-  gallery.className = `gallery ${state.layout} size-${state.size}${riverPending ? ' river-pending' : ''}`;
-  const existingTiles = [...gallery.querySelectorAll('.tile')];
-  const canAppend = append && existingTiles.length < state.items.length &&
-    existingTiles.every((tile, index) => tile.dataset.id === state.items[index]?.id);
+  const ids = new Set(state.items.map(item => item.id));
+  const position = captureGalleryPosition(gallery, ids);
+  if (!preserveAnchor) position.anchor = null;
+  const existingTiles = new Map([...gallery.querySelectorAll('.tile')].map(tile => [tile.dataset.id, tile]));
+  let geometryChanged = Boolean(state.galleryLayoutFrame);
+  const tiles = state.items.map(item => {
+    let tile = existingTiles.get(item.id);
+    if (!tile || tile.dataset.kind !== item.kind) {
+      const template = document.createElement('template');
+      template.innerHTML = tileHTML(item).trim();
+      tile = template.content.firstElementChild;
+      geometryChanged = true;
+    } else {
+      if (tile.getAttribute('aria-label') !== item.name) tile.setAttribute('aria-label', item.name);
+      if (tile.dataset.tooltip !== t('mediaTip')) tile.dataset.tooltip = t('mediaTip');
+      const source = mediaThumbnailURL(item);
+      const contentVersion = mediaContentVersion(item);
+      if (tile.dataset.contentVersion !== contentVersion) {
+        tile.dataset.contentVersion = contentVersion;
+        state.aspectRatios.delete(item.id);
+      }
+      if (tile.dataset.thumbnailSource !== source) {
+        replaceGalleryThumbnail(tile, source);
+      }
+      const ratio = String(galleryAspectRatio(item));
+      if (tile.dataset.aspectRatio !== ratio) {
+        tile.dataset.aspectRatio = ratio;
+        geometryChanged = true;
+      }
+    }
+    return tile;
+  });
+  const className = `gallery ${state.layout} size-${state.size}`;
+  geometryChanged ||= gallery.className !== className || existingTiles.size !== tiles.length ||
+    [...existingTiles.values()].some((tile, index) => tile !== tiles[index]);
+  if (gallery.className !== className) gallery.className = className;
+  cancelAnimationFrame(state.galleryLayoutFrame);
+  state.galleryLayoutFrame = 0;
   if (!state.items.length) {
-    gallery.innerHTML = `<p class="empty">${t('noMedia')}</p>`;
-  } else if (canAppend) {
-    gallery.insertAdjacentHTML('beforeend', state.items.slice(existingTiles.length).map(tileHTML).join(''));
-  } else {
-    gallery.innerHTML = state.items.map(tileHTML).join('');
+    const empty = gallery.querySelector(':scope > .empty') || document.createElement('p');
+    empty.className = 'empty';
+    empty.textContent = t('noMedia');
+    reconcileGalleryChildren(gallery, [empty]);
+  } else if (state.layout === 'river' && geometryChanged) {
+    // Lay out the retained nodes in this turn, before the browser can paint.
+    layoutRiverGallery(tiles);
+  } else if (state.layout !== 'river' && geometryChanged) {
+    tiles.forEach(tile => {
+      tile.style.removeProperty('width');
+      tile.style.removeProperty('height');
+    });
+    reconcileGalleryChildren(gallery, tiles);
   }
+  $$(':scope > .error', gallery).forEach(error => error.remove());
   bindGalleryThumbnails(gallery);
-  if (state.layout === 'river') {
-    scheduleRiverLayout();
+  if (state.layout === 'river' && !state.galleryObserver) {
     if ('ResizeObserver' in window) {
       state.galleryObserver = new ResizeObserver(entries => {
         const width = entries[0]?.contentRect.width || 0;
@@ -111,6 +235,26 @@ function updateGalleryItems(append = false) {
       state.galleryObserver.observe(gallery);
     }
   }
+  restoreGalleryPosition(position);
+  updateGallerySummary();
+}
+
+function updateGalleryLabels() {
+  const labels = [['sort-menu', 'sort', 'sortTip'], ['view-menu', 'view', 'viewTip'],
+    ['filter-menu', 'filter', 'filterTip'], ['scan-menu', 'rescan', 'rescanTip']];
+  labels.forEach(([id, label, tip]) => {
+    const button = $(`#${id}`);
+    if (!button) return;
+    button.lastChild.textContent = t(label);
+    button.dataset.tooltip = t(tip);
+  });
+  const settings = $('#settings');
+  settings?.setAttribute('aria-label', t('settings'));
+  if (settings) settings.dataset.tooltip = t('settingsTip');
+  $('.progress')?.setAttribute('aria-label', t('loading'));
+}
+
+function updateGallerySummary() {
   const sortLabels = {captured: t('captured'), created: t('created'), modified: t('modified'), name: t('name'), random: t('random')};
   const filterLabels = {'': t('all'), image: t('images'), video: t('videos')};
   const filterConditionLabel = state.filterCondition === 'duplicates' ? ` · ${t('duplicates')}` : '';
@@ -122,35 +266,75 @@ function updateGalleryItems(append = false) {
     `${filterLabels[state.filter]}${filterConditionLabel} · ${state.total}`;
 }
 
-function tileHTML(item) {
-  const thumb = `/api/media/${item.id}/thumbnail${state.thumbnailVersion ? `?v=${state.thumbnailVersion}` : ''}`;
-  const knownRatio = item.kind === 'video'
+function galleryAspectRatio(item) {
+  return item.kind === 'video'
     ? 1
     : Number(item.width) > 0 && Number(item.height) > 0
     ? Number(item.width) / Number(item.height)
     : state.aspectRatios.get(item.id) || 4 / 3;
-  return `<button class="tile" data-id="${item.id}" data-kind="${item.kind}" data-aspect-ratio="${knownRatio}" aria-label="${escapeHTML(item.name)}" data-tooltip="${t('mediaTip')}">
+}
+
+function tileHTML(item) {
+  const thumb = mediaThumbnailURL(item);
+  return `<button class="tile" data-id="${item.id}" data-kind="${item.kind}" data-aspect-ratio="${galleryAspectRatio(item)}" data-content-version="${escapeHTML(mediaContentVersion(item))}" data-thumbnail-source="${escapeHTML(thumb)}" aria-label="${escapeHTML(item.name)}" data-tooltip="${t('mediaTip')}">
     <span class="thumb-fallback"></span>
-    <img src="${thumb}" loading="lazy" decoding="async" alt="">
+    <img src="${escapeHTML(thumb)}" loading="lazy" decoding="async" alt="">
     ${item.kind === 'video' ? '<span class="play-mark" aria-hidden="true"><m3e-icon name="play_arrow"></m3e-icon></span>' : ''}
   </button>`;
 }
 
+function replaceGalleryThumbnail(tile, source) {
+  $('img[data-thumbnail-pending]', tile)?.remove();
+  tile.dataset.thumbnailSource = source;
+  const current = $('img', tile);
+  const image = new Image();
+  image.alt = '';
+  image.decoding = 'async';
+  image.loading = 'lazy';
+  if (!current) {
+    image.src = source;
+    tile.append(image);
+    return;
+  }
+  // Load a second image without covering the displayed thumbnail. Native lazy
+  // loading still prioritizes visible tiles when all thumbnails are regenerated.
+  image.dataset.thumbnailPending = '1';
+  image.style.opacity = '0';
+  const discard = () => {
+    const active = $('img[data-thumbnail-pending]', tile) === image;
+    image.remove();
+    if (active && tile.dataset.thumbnailSource === source) tile.dataset.thumbnailSource = '';
+  };
+  image.onload = async () => {
+    try { await image.decode(); } catch { discard(); return; }
+    if (!image.isConnected || tile.dataset.thumbnailSource !== source) return;
+    delete image.dataset.thumbnailPending;
+    image.style.removeProperty('opacity');
+    if (current.isConnected) current.replaceWith(image);
+    bindGalleryThumbnails(tile);
+  };
+  image.onerror = discard;
+  image.src = source;
+  tile.append(image);
+}
+
 function bindGalleryThumbnails(gallery) {
-  $$('img:not([data-ratio-bound])', gallery).forEach(image => {
+  $$('img:not([data-ratio-bound]):not([data-thumbnail-pending])', gallery).forEach(image => {
     image.dataset.ratioBound = '1';
     const tile = image.closest('.tile');
     const updateRatio = () => {
-      if (!image.naturalWidth || !image.naturalHeight) return;
+      if (!image.naturalWidth || !image.naturalHeight || $('img[data-thumbnail-pending]', tile)) return;
       const ratio = image.naturalWidth / image.naturalHeight;
       state.aspectRatios.set(tile.dataset.id, ratio);
-      if (tile.dataset.kind !== 'video' && gallery.classList.contains('river-pending')) {
+      if (tile.dataset.kind !== 'video' && Math.abs(Number(tile.dataset.aspectRatio) - ratio) > 0.001) {
         tile.dataset.aspectRatio = String(ratio);
+        scheduleRiverLayout();
       }
     };
     image.addEventListener('load', updateRatio, {once: true});
     image.addEventListener('error', () => {
       image.remove();
+      if (!$('img[data-thumbnail-pending]', tile)) tile.dataset.thumbnailSource = '';
     }, {once: true});
     if (image.complete) updateRatio();
   });
@@ -159,40 +343,50 @@ function bindGalleryThumbnails(gallery) {
 function scheduleRiverLayout() {
   if (state.layout !== 'river') return;
   cancelAnimationFrame(state.galleryLayoutFrame);
-  state.galleryLayoutFrame = requestAnimationFrame(layoutRiverGallery);
+  state.galleryLayoutFrame = requestAnimationFrame(() => {
+    const gallery = $('#gallery');
+    if (!gallery) return;
+    const position = captureGalleryPosition(gallery);
+    layoutRiverGallery();
+    restoreGalleryPosition(position);
+  });
 }
 
-function layoutRiverGallery() {
+function layoutRiverGallery(tiles = null) {
   state.galleryLayoutFrame = 0;
   const gallery = $('#gallery');
   if (!gallery || state.layout !== 'river' || !window.NasPhotoLayout) return;
-  const tiles = [...gallery.querySelectorAll('.tile')];
+  tiles ||= [...gallery.querySelectorAll('.tile')];
   if (!tiles.length) return;
 
   const style = getComputedStyle(gallery);
   const width = gallery.clientWidth -
     (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0);
-  if (width <= 0) return;
+  if (width <= 0) {
+    reconcileGalleryChildren(gallery, tiles);
+    return;
+  }
+  state.galleryWidth = width;
   const targetHeight = parseFloat(style.getPropertyValue('--river-target-height')) || 180;
   const gap = parseFloat(style.getPropertyValue('--river-gap')) || 0;
   const ratios = tiles.map(tile => Number(tile.dataset.aspectRatio) || 4 / 3);
   const rows = window.NasPhotoLayout.computeJustifiedRows(ratios, width, targetHeight, gap);
-  const content = document.createDocumentFragment();
+  const existingRows = [...gallery.querySelectorAll(':scope > .river-row')];
+  const content = [];
 
-  rows.forEach(row => {
-    const rowElement = document.createElement('div');
+  rows.forEach((row, rowIndex) => {
+    const rowElement = existingRows[rowIndex] || document.createElement('div');
     rowElement.className = `river-row${row.justified ? ' justified' : ''}`;
     rowElement.style.gap = `${row.gap}px`;
     for (let index = row.start; index < row.end; index += 1) {
       const tile = tiles[index];
       tile.style.width = `${Math.max(1, row.widths[index - row.start])}px`;
       tile.style.height = `${Math.max(1, row.height)}px`;
-      rowElement.append(tile);
     }
-    content.append(rowElement);
+    reconcileGalleryChildren(rowElement, tiles.slice(row.start, row.end));
+    content.push(rowElement);
   });
-  gallery.replaceChildren(content);
-  gallery.classList.remove('river-pending');
+  reconcileGalleryChildren(gallery, content);
 }
 
 function connectGalleryShell() {
@@ -209,7 +403,7 @@ function connectGalleryShell() {
     state.layout = draft.layout;
     state.size = draft.size;
     savePreferences();
-    updateGalleryItems(false);
+    updateGalleryItems();
   });
   $('#filter-menu').onclick = () => optionDialog(t('filter'), [
     [t('mediaType'), 'filter', [[t('all'), ''], [t('images'), 'image'], [t('videos'), 'video']]],
@@ -232,7 +426,7 @@ function connectGalleryShell() {
     try {
       if (value === 'scan') {
         await api('/api/index/rescan', {method: 'POST'});
-        monitorScan(state.galleryToken);
+        monitorScan(state.galleryToken, true);
         return;
       }
       if (value === 'cleanup-thumbnails') {
@@ -256,12 +450,21 @@ function connectGalleryShell() {
 }
 
 async function monitorScan(token, observedRunning = false, observedThumbnailing = false, observedCleanup = false) {
+  if (token !== state.galleryToken || !$('#gallery')) return;
+  observedRunning ||= state.scanWatch.scan;
+  observedThumbnailing ||= state.scanWatch.thumbnails;
+  observedCleanup ||= state.scanWatch.cleanup;
+  state.scanWatch.scan = observedRunning;
+  state.scanWatch.thumbnails = observedThumbnailing;
+  state.scanWatch.cleanup = observedCleanup;
+  const monitorToken = ++state.scanMonitorToken;
   clearTimeout(state.pollTimer);
   try {
     const progress = await api('/api/index/current');
-    if (token !== state.galleryToken || !$('#gallery')) return;
+    if (token !== state.galleryToken || monitorToken !== state.scanMonitorToken || !$('#gallery')) return;
     const bar = $('.progress');
-    const working = progress.scanning || progress.thumbnailing || progress.thumbnailCleaning;
+    const scanning = progress.scanning || progress.scanPending;
+    const working = scanning || progress.thumbnailing || progress.thumbnailCleaning;
     const thumbnailPercent = progress.thumbnailTotal > 0
       ? Math.round(progress.thumbnailDone * 100 / progress.thumbnailTotal)
       : 0;
@@ -269,29 +472,42 @@ async function monitorScan(token, observedRunning = false, observedThumbnailing 
       ? Math.round(progress.thumbnailCleanupDone * 100 / progress.thumbnailCleanupTotal)
       : 0;
     bar.hidden = !working;
-    const indeterminate = (progress.scanning && !progress.total) || (progress.thumbnailCleaning && !progress.thumbnailCleanupTotal);
+    const indeterminate = (scanning && (!progress.scanning || !progress.total)) || (progress.thumbnailCleaning && !progress.thumbnailCleanupTotal);
     bar.mode = indeterminate ? 'indeterminate' : 'determinate';
     bar.max = 100;
     if (!indeterminate) {
       bar.value = progress.thumbnailCleaning ? cleanupPercent : (progress.thumbnailing ? thumbnailPercent : (progress.percent || 0));
     }
+    state.scanWatch.scan = observedRunning || scanning;
+    state.scanWatch.thumbnails = observedThumbnailing || progress.thumbnailing;
+    state.scanWatch.cleanup = observedCleanup || progress.thumbnailCleaning;
+    if (!working && observedThumbnailing) {
+      state.scanWatch.thumbnails = false;
+      state.thumbnailVersion = Date.now();
+      updateGalleryItems();
+      showThumbnailResult(progress);
+    }
+    if (!working && observedCleanup) {
+      state.scanWatch.cleanup = false;
+      showThumbnailCleanupResult(progress);
+    }
     if (working) {
       state.pollTimer = setTimeout(() => monitorScan(
         token,
-        observedRunning || progress.scanning,
+        observedRunning || scanning,
         observedThumbnailing || progress.thumbnailing,
         observedCleanup || progress.thumbnailCleaning
-      ), 750);
+      ), 250);
     } else if (observedRunning) {
-      if (progress.phase === 'ready') await refreshGalleryItems();
-    } else if (observedThumbnailing) {
-      state.thumbnailVersion = Date.now();
-      updateGalleryItems(false);
-      showThumbnailResult(progress);
-    } else if (observedCleanup) {
-      showThumbnailCleanupResult(progress);
+      state.scanWatch.scan = false;
+      if (progress.phase === 'ready') {
+        await refreshGalleryItems();
+        mediaLibraryChannel?.postMessage({type: 'libraryChanged'});
+      }
     }
   } catch {
+    if (token !== state.galleryToken || monitorToken !== state.scanMonitorToken || !$('#gallery')) return;
+    state.scanWatch.scan ||= observedRunning;
     state.pollTimer = setTimeout(() => monitorScan(token, observedRunning, observedThumbnailing, observedCleanup), 2000);
   }
 }

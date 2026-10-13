@@ -1,5 +1,40 @@
 function findItem(id) {
-  return state.items.find(item => item.id === id);
+  return state.items.find(item => item.id === id) ||
+    state.viewerItems.find(item => item?.id === id && state.viewer.includes(id));
+}
+
+function syncViewerGalleryItems(previousItems = state.items) {
+  if (!state.viewer.some(Boolean)) return;
+  const byID = new Map(state.items.map(item => [item.id, item]));
+  state.viewer.forEach((id, paneIndex) => {
+    if (!id) return;
+    if (byID.has(id)) state.viewerItems[paneIndex] = byID.get(id);
+    const index = state.items.findIndex(item => item.id === id);
+    const oldIndex = previousItems.findIndex(item => item.id === id);
+    const neighbors = state.viewerNeighbors[paneIndex];
+    for (const [direction, delta] of [['previous', -1], ['next', 1]]) {
+      let neighbor = index >= 0 ? state.items[index + delta] : null;
+      // Keep navigation usable when the displayed file leaves the library.
+      if (index < 0 && oldIndex >= 0) {
+        for (let position = oldIndex + delta; position >= 0 && position < previousItems.length; position += delta) {
+          neighbor = byID.get(previousItems[position].id);
+          if (neighbor) break;
+        }
+      } else if (index < 0) {
+        neighbor = byID.get(neighbors[direction]?.id);
+      }
+      neighbors[direction] = neighbor || null;
+      const slide = $(`.viewer .pane[data-pane="${paneIndex}"] .swipe-slide-${direction}`);
+      if (!slide) continue;
+      const key = neighbor ? `${neighbor.id}:${mediaThumbnailURL(neighbor)}` : '';
+      slide.dataset.available = String(Boolean(neighbor));
+      if (slide.dataset.previewKey === key) continue;
+      slide.dataset.previewKey = key;
+      slide.innerHTML = swipePreviewHTML(neighbor);
+    }
+    const pane = $(`.viewer .pane[data-pane="${paneIndex}"]`);
+    if (pane) fitSwipePreviews(pane);
+  });
 }
 
 function materialViewTransitionsEnabled() {
@@ -8,6 +43,7 @@ function materialViewTransitionsEnabled() {
 
 function visibleGalleryImage(id) {
   const tile = $(`.tile[data-id="${CSS.escape(id)}"]`);
+  if (!tile) return null;
   const image = $('img', tile);
   if (!image) return null;
   const rect = image.getBoundingClientRect();
@@ -88,6 +124,7 @@ function installRetainedViewerPreview(root, preview) {
 
 function openViewer(id, paneIndex = 0, swipeOffset = 0, swipeVelocity = 0, retainedPreview = null) {
   hideTooltip();
+  state.viewerItems[paneIndex] = findItem(id) || null;
   state.viewer[paneIndex] = id;
   state.activePane = paneIndex;
   state.zoomAnimationCancel[paneIndex]?.();
@@ -198,6 +235,8 @@ function leaveViewer() {
   const scrollY = state.viewerScrollY;
   state.viewer[0] = null;
   state.viewer[1] = null;
+  state.viewerItems = [null, null];
+  state.viewerNeighbors = [{previous: null, next: null}, {previous: null, next: null}];
   state.split = false;
   state.splitViewStates = null;
   $('.viewer-layer', app)?.remove();
@@ -230,6 +269,9 @@ async function applyTrashedMedia(id) {
 if (mediaLibraryChannel) {
   mediaLibraryChannel.onmessage = event => {
     if (event.data?.type === 'mediaTrashed') void applyTrashedMedia(String(event.data.id));
+    if (event.data?.type === 'libraryChanged' && $('#gallery')) {
+      void refreshGalleryItems().catch(() => {});
+    }
   };
 }
 
@@ -282,8 +324,9 @@ function paneHTML(id, index) {
           decoding="async" style="transform:${transform}">
       </span>`;
   const itemIndex = state.items.findIndex(candidate => candidate.id === id);
-  const previous = itemIndex > 0 ? state.items[itemIndex - 1] : null;
-  const next = itemIndex >= 0 ? state.items[itemIndex + 1] : null;
+  const previous = itemIndex >= 0 ? state.items[itemIndex - 1] : state.viewerNeighbors[index].previous;
+  const next = itemIndex >= 0 ? state.items[itemIndex + 1] : state.viewerNeighbors[index].next;
+  state.viewerNeighbors[index] = {previous: previous || null, next: next || null};
   const primaryScreen = embeddedRole !== 'secondary';
   const previousAction = primaryScreen ? 'prev1' : 'prev2';
   const nextAction = primaryScreen ? 'next1' : 'next2';
@@ -304,10 +347,6 @@ function paneHTML(id, index) {
           data-tooltip="${t('muteTip')}" data-shortcut-action="mute"><m3e-icon slot="icon" name="volume_off"></m3e-icon><span class="toggle-state">${state.muted ? 'ON' : 'OFF'}</span></m3e-button>
       </div>` : ''}
     </div></section>`;
-}
-
-function mediaThumbnailURL(item) {
-  return `/api/media/${item.id}/thumbnail${state.thumbnailVersion ? `?v=${state.thumbnailVersion}` : ''}`;
 }
 
 function swipePreviewHTML(item) {
@@ -442,8 +481,7 @@ async function move(paneIndex, delta, swipeOffset = 0, swipeVelocity = 0) {
     if (!await loadNextPage()) return;
     index = state.items.findIndex(item => item.id === current);
   }
-  if (index < 0) return;
-  let next = state.items[index + delta];
+  let next = index < 0 ? state.viewerNeighbors[paneIndex][delta < 0 ? 'previous' : 'next'] : state.items[index + delta];
   while (!next && delta > 0 && state.nextOffset >= 0) {
     if (!await loadNextPage()) return;
     index = state.items.findIndex(item => item.id === current);

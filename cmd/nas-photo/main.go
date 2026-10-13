@@ -743,7 +743,7 @@ func (a *app) runScan(ctx context.Context) {
 			a.scanMu.Unlock()
 			width, height := 0, 0
 			id := stableID(root.ID, rel)
-			if old, ok := existing[id]; ok && old.Size == info.Size() && old.Modified.Equal(info.ModTime()) {
+			if old, ok := existing[id]; ok && old.Size == info.Size() && old.Modified.Equal(info.ModTime()) && old.Width > 0 && old.Height > 0 {
 				width, height = old.Width, old.Height
 			} else {
 				width, height = mediaDimensions(path, k)
@@ -854,10 +854,13 @@ func (a *app) index(w http.ResponseWriter, r *http.Request) {
 	if !a.authed(w, r) {
 		return
 	}
+	a.uploadRescanMu.Lock()
+	scanPending := a.uploadRescanPending || a.uploadRescanRunning
+	a.uploadRescanMu.Unlock()
 	a.scanMu.Lock()
 	defer a.scanMu.Unlock()
 	jsonOut(w, map[string]any{
-		"scanning": a.scanning, "phase": a.scanPhase, "done": a.scanDone, "total": a.scanTotal,
+		"scanning": a.scanning, "scanPending": scanPending, "phase": a.scanPhase, "done": a.scanDone, "total": a.scanTotal,
 		"errors":       append([]string(nil), a.scanErrors...),
 		"thumbnailing": a.thumbnailing, "thumbnailDone": a.thumbDone,
 		"thumbnailTotal": a.thumbTotal, "thumbnailErrors": a.thumbErrors,
@@ -887,6 +890,9 @@ func (a *app) rescanAPI(w http.ResponseWriter, r *http.Request) {
 	started := a.beginScan()
 	if started {
 		go a.runScan(context.Background())
+	} else {
+		// Run again after the active scan, so this request sees subsequent file changes.
+		a.scheduleRescan()
 	}
 	jsonOut(w, map[string]bool{"ok": true, "started": started})
 }
@@ -941,6 +947,11 @@ func (a *app) media(w http.ResponseWriter, r *http.Request) {
 		out = groupDuplicateItems(out, groups)
 	}
 	total := len(out)
+	if r.URL.Query().Get("snapshot") == "1" {
+		// Refresh clients can replace the complete list from one consistent snapshot.
+		jsonOut(w, map[string]any{"items": out, "total": total, "nextOffset": -1})
+		return
+	}
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	if offset < 0 {

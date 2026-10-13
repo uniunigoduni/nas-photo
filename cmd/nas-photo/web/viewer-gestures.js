@@ -2,8 +2,8 @@ function bindSwipe(pane, index) {
   fitSwipePreviews(pane);
   const track = $('.swipe-track', pane);
   const image = $('.swipe-slide-current .zoomable', pane);
-  const previousAvailable = $('.swipe-slide-previous', pane)?.dataset.available === 'true';
-  const nextAvailable = $('.swipe-slide-next', pane)?.dataset.available === 'true';
+  const previousAvailable = () => $('.swipe-slide-previous', pane)?.dataset.available === 'true';
+  const nextAvailable = () => $('.swipe-slide-next', pane)?.dataset.available === 'true';
   const pointers = new Map();
   let primaryPointerId = null;
   let mode = 'idle';
@@ -280,8 +280,8 @@ function bindSwipe(pane, index) {
         const bounds = imageZoomBounds(pane, image, state.zoom[index].scale);
         const touchLike = event.pointerType !== 'mouse';
         const canSwipeFromZoomEdge = dragAxis === 'x' && touchLike && (
-          (dx > 0 && previousAvailable && panStart.x >= bounds.x - 0.5) ||
-          (dx < 0 && nextAvailable && panStart.x <= -bounds.x + 0.5)
+          (dx > 0 && previousAvailable() && panStart.x >= bounds.x - 0.5) ||
+          (dx < 0 && nextAvailable() && panStart.x <= -bounds.x + 0.5)
         );
         mode = canSwipeFromZoomEdge ? 'swipe' : 'pan';
       } else {
@@ -312,7 +312,7 @@ function bindSwipe(pane, index) {
     }
     if (mode !== 'swipe') return;
     const swipeDx = event.clientX - startX;
-    const atEdge = (swipeDx > 0 && !previousAvailable) || (swipeDx < 0 && !nextAvailable);
+    const atEdge = (swipeDx > 0 && !previousAvailable()) || (swipeDx < 0 && !nextAvailable());
     queueOffset(startOffset + (atEdge ? swipeDx * GESTURE_END_FRICTION : swipeDx));
     event.preventDefault();
   });
@@ -349,7 +349,7 @@ function bindSwipe(pane, index) {
       const distanceCommit = Math.abs(projectedOffset) >= distanceThreshold;
       const directionSource = velocityCommit ? releaseVelocity.x : projectedOffset;
       const direction = velocityCommit || distanceCommit ? (directionSource < 0 ? 1 : -1) : 0;
-      const canMove = direction < 0 ? previousAvailable : direction > 0 ? nextAvailable : false;
+      const canMove = direction < 0 ? previousAvailable() : direction > 0 ? nextAvailable() : false;
       if (canMove) {
         stopTrackSpring();
         track.classList.remove('is-dragging');
