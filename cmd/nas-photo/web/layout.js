@@ -87,5 +87,50 @@
     return rows;
   }
 
-  return {computeJustifiedRows};
+  // Add document-space offsets without changing the existing row breaks or widths.
+  function positionJustifiedRows(rows, gap) {
+    let top = 0;
+    for (let index = 0; index < rows.length; index += 1) {
+      const row = rows[index];
+      row.top = top;
+      row.bottom = top + Math.max(1, row.height);
+      top = row.bottom + (index + 1 < rows.length ? gap : 0);
+    }
+    return top;
+  }
+
+  // End-exclusive row window, found in O(log rows) even for very large libraries.
+  function visibleJustifiedRows(rows, top, bottom) {
+    if (!rows.length) return {start: 0, end: 0};
+    let lo = 0;
+    let hi = rows.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (rows[mid].bottom <= top) lo = mid + 1;
+      else hi = mid;
+    }
+    const start = Math.min(lo, rows.length - 1);
+    lo = start;
+    hi = rows.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (rows[mid].top < bottom) lo = mid + 1;
+      else hi = mid;
+    }
+    return {start, end: Math.max(start + 1, lo)};
+  }
+
+  // Find a photo's row by its stable position in the sorted media list.
+  function justifiedRowForItem(rows, itemIndex) {
+    let lo = 0;
+    let hi = rows.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (rows[mid].end <= itemIndex) lo = mid + 1;
+      else hi = mid;
+    }
+    return rows[lo]?.start <= itemIndex ? rows[lo] : null;
+  }
+
+  return {computeJustifiedRows, positionJustifiedRows, visibleJustifiedRows, justifiedRowForItem};
 });

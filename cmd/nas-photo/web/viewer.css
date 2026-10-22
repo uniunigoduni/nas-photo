@@ -1,8 +1,20 @@
 /* Viewer styles. This file is the sole owner of these selectors. */
 :root {
-  --nas-gallery-view-transition-duration: 250ms;
-  --nas-gallery-view-transition-easing: cubic-bezier(.2, 0, 0, 1);
+  --nas-gallery-photo-morph-duration: 180ms;
+  --nas-gallery-photo-morph-easing: cubic-bezier(.22, .8, .2, 1);
 }
+
+.nas-photo-photo-morph {
+  position: fixed;
+  z-index: 2147483000;
+  display: block;
+  box-sizing: border-box;
+  object-fit: cover;
+  pointer-events: none;
+  user-select: none;
+  will-change: left, top, width, height;
+}
+
 
 html:has(body.viewer-open) {
   overflow: hidden;
@@ -283,21 +295,6 @@ body.viewer-open {
 .controls > m3e-icon-button {
   position: absolute;
   --m3e-icon-button-container-color: color-mix(in srgb, var(--nas-color-surface-container-high, #111827) 88%, transparent);
-}
-
-::view-transition-group(nas-photo-media) {
-  animation-duration: var(--nas-gallery-view-transition-duration);
-  animation-timing-function: var(--nas-gallery-view-transition-easing);
-}
-
-::view-transition-old(nas-photo-media) {
-  height: 100%;
-  object-fit: contain;
-}
-
-::view-transition-new(nas-photo-media) {
-  height: 100%;
-  object-fit: contain;
 }
 
 @media (max-width: 767px) {

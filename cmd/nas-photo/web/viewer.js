@@ -37,65 +37,143 @@ function syncViewerGalleryItems(previousItems = state.items) {
   });
 }
 
-function materialViewTransitionsEnabled() {
-  return !embeddedMode && 'startViewTransition' in document;
+// A browser View Transition rasterizes and composites snapshots of the old
+// and new media. This becomes very expensive with GPU compositing disabled.
+// Move ONE already decoded thumbnail instead; no snapshots or full-screen fade.
+let activePhotoMorph = null;
+
+function photoMorphEnabled(image) {
+  return !embeddedMode && !document.hidden &&
+    !!image?.complete && image.naturalWidth > 0;
 }
 
 function visibleGalleryImage(id) {
   const tile = $(`.tile[data-id="${CSS.escape(id)}"]`);
   if (!tile) return null;
-  const image = $('img', tile);
-  if (!image) return null;
+  const image = $('img:not([data-thumbnail-pending])', tile);
+  if (!photoMorphEnabled(image)) return null;
   const rect = image.getBoundingClientRect();
-  if (rect.bottom <= 0 || rect.top >= innerHeight || rect.right <= 0 || rect.left >= innerWidth) return null;
+  if (rect.bottom <= 0 || rect.top >= innerHeight ||
+      rect.right <= 0 || rect.left >= innerWidth) return null;
   return image;
 }
 
-function currentViewerTransitionMedia() {
-  return $('.swipe-slide-current .viewer-image-placeholder', app) || $('.swipe-slide-current .media', app);
+function viewerPhotoRect(item, pane, image = null) {
+  if (!item || !pane) return null;
+  const dimensions = [
+    // Match the pixels being animated, even when cached index metadata
+    // still has the orientation from before an EXIF rotation.
+    [image?.naturalWidth, image?.naturalHeight],
+    [Number(item.width), Number(item.height)]
+  ].find(([width, height]) => width > 0 && height > 0);
+  if (!dimensions) return null;
+  const rect = pane.getBoundingClientRect();
+  if (!rect.width || !rect.height) return null;
+  const size = containedMediaSize(rect.width, rect.height, ...dimensions);
+  return {
+    left: rect.left + (rect.width - size.width) / 2,
+    top: rect.top + (rect.height - size.height) / 2,
+    width: size.width,
+    height: size.height
+  };
+}
+
+// Animate only an inexpensive thumbnail. Animating the geometry of a single
+// position:fixed element avoids the multi-snapshot software-compositing path.
+// object-fit:cover smoothly uncrops a square tile as its bounds become the
+// actual aspect ratio of the full viewer image.
+function animateGalleryPhoto(source, from, to, hiddenTarget = null, reverse = false) {
+  if (!source?.src || !from || !to) return false;
+  activePhotoMorph?.cancel();
+
+  const ghost = document.createElement('img');
+  ghost.className = 'nas-photo-photo-morph';
+  ghost.alt = '';
+  ghost.draggable = false;
+  ghost.decoding = 'async';
+  ghost.src = source.currentSrc || source.src;
+  const pixels = rect => ({
+    left: `${rect.left}px`,
+    top: `${rect.top}px`,
+    width: `${rect.width}px`,
+    height: `${rect.height}px`
+  });
+  Object.assign(ghost.style, pixels(from));
+  const tile = source.closest('.tile');
+  const tileRadius = tile ? getComputedStyle(tile).borderRadius : '0px';
+  const fromRadius = reverse ? '0px' : tileRadius;
+  const toRadius = reverse ? tileRadius : '0px';
+  ghost.style.borderRadius = fromRadius;
+  document.body.append(ghost);
+
+  const previousVisibility = hiddenTarget?.style.visibility;
+  if (hiddenTarget) hiddenTarget.style.visibility = 'hidden';
+  let cleanedUp = false;
+  const cleanup = () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    ghost.remove();
+    if (hiddenTarget) hiddenTarget.style.visibility = previousVisibility;
+    if (activePhotoMorph?.cancel === cancel) activePhotoMorph = null;
+  };
+  let animation;
+  const cancel = () => animation?.cancel();
+  try {
+    const settings = getComputedStyle(document.documentElement);
+    const duration = cssTimeMilliseconds(settings.getPropertyValue('--nas-gallery-photo-morph-duration')) || 180;
+    const easing = settings.getPropertyValue('--nas-gallery-photo-morph-easing').trim() || 'ease-out';
+    animation = ghost.animate([
+      {...pixels(from), borderRadius: fromRadius},
+      {...pixels(to), borderRadius: toRadius}
+    ], {duration, easing, fill:'forwards'});
+    activePhotoMorph = {cancel};
+    animation.addEventListener('finish', cleanup, {once:true});
+    animation.addEventListener('cancel', cleanup, {once:true});
+    return true;
+  } catch {
+    cleanup();
+    return false;
+  }
 }
 
 function openViewerFromTile(tile) {
   const id = tile?.dataset.id;
   if (!id) return;
   state.viewerTransitionSourceId = id;
-  const source = $('img', tile);
-  if (!source || !materialViewTransitionsEnabled()) {
+  const item = findItem(id);
+  const source = $('img:not([data-thumbnail-pending])', tile);
+  // A video or unloaded thumbnail opens directly without an image morph.
+  if (item?.kind !== 'image' || !photoMorphEnabled(source)) {
+    activePhotoMorph?.cancel();
     openViewer(id, 0);
     return;
   }
-  source.style.viewTransitionName = 'nas-photo-media';
-  let target = null;
-  const transition = document.startViewTransition(() => {
-    source.style.viewTransitionName = 'none';
-    openViewer(id, 0);
-    target = currentViewerTransitionMedia();
-    if (target) target.style.viewTransitionName = 'nas-photo-media';
-  });
-  transition.finished.catch(() => {}).finally(() => {
-    source.style.viewTransitionName = '';
-    if (target) target.style.viewTransitionName = '';
-  });
+
+  const from = source.getBoundingClientRect();
+  openViewer(id, 0);
+  const pane = $('.viewer .swipe-slide-current', app)?.closest('.pane');
+  const to = viewerPhotoRect(item, pane, source);
+  const stage = $('.viewer .swipe-slide-current .viewer-image-stage', app);
+  animateGalleryPhoto(source, from, to, stage);
 }
 
 function leaveViewerWithTransition() {
   const id = state.viewer[0];
-  const target = currentViewerTransitionMedia();
-  const galleryImage = id && id === state.viewerTransitionSourceId ? visibleGalleryImage(id) : null;
-  if (!target || !galleryImage || !materialViewTransitionsEnabled() || state.split) {
+  const item = findItem(id);
+  const thumbnail = id === state.viewerTransitionSourceId
+    ? visibleGalleryImage(id) : null;
+  const pane = $('.viewer .swipe-slide-current', app)?.closest('.pane');
+  const from = viewerPhotoRect(item, pane, thumbnail);
+  const to = thumbnail?.getBoundingClientRect();
+
+  if (!thumbnail || item?.kind !== 'image' || state.split ||
+      state.zoom[0].scale > 1.001 || !from || !to) {
+    activePhotoMorph?.cancel();
     leaveViewer();
     return;
   }
-  target.style.viewTransitionName = 'nas-photo-media';
-  const transition = document.startViewTransition(() => {
-    target.style.viewTransitionName = 'none';
-    leaveViewer();
-    galleryImage.style.viewTransitionName = 'nas-photo-media';
-  });
-  transition.finished.catch(() => {}).finally(() => {
-    target.style.viewTransitionName = '';
-    galleryImage.style.viewTransitionName = '';
-  });
+  leaveViewer();
+  animateGalleryPhoto(thumbnail, from, to, thumbnail, true);
 }
 
 function takeViewerSwipePreview(paneIndex, delta) {

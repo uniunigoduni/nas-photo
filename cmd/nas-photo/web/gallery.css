@@ -27,6 +27,14 @@
   --river-target-height: 180px;
   --river-gap: 8px;
   display: block;
+  /* The gallery restores its own photo anchor when row heights change. */
+  overflow-anchor: none;
+}
+
+.river-spacer {
+  display: block;
+  width: 100%;
+  pointer-events: none;
 }
 
 .gallery.river.size-small {

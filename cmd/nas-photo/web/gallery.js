@@ -12,6 +12,10 @@ async function showGallery() {
   state.scanWatch = {scan: false, thumbnails: false, cleanup: false};
   state.galleryObserver?.disconnect();
   state.galleryObserver = null;
+  cancelAnimationFrame(state.galleryRenderFrame);
+  state.galleryRenderFrame = 0;
+  state.galleryRiverGeometry = null;
+  state.galleryRiverRange = null;
   state.galleryQuery = queryString();
   document.body.classList.remove('viewer-open');
   state.items = [];
@@ -169,6 +173,14 @@ function reconcileGalleryChildren(parent, children) {
 function updateGalleryItems(preserveAnchor = true) {
   const gallery = $('#gallery');
   if (!gallery) return;
+  if (state.layout === 'river') {
+    updateRiverGallery(preserveAnchor);
+    return;
+  }
+  state.galleryObserver?.disconnect();
+  state.galleryObserver = null;
+  state.galleryRiverGeometry = null;
+  state.galleryRiverRange = null;
   const ids = new Set(state.items.map(item => item.id));
   const position = captureGalleryPosition(gallery, ids);
   if (!preserveAnchor) position.anchor = null;
@@ -189,6 +201,7 @@ function updateGalleryItems(preserveAnchor = true) {
       if (tile.dataset.contentVersion !== contentVersion) {
         tile.dataset.contentVersion = contentVersion;
         state.aspectRatios.delete(item.id);
+        state.aspectRatioVersions.delete(item.id);
       }
       if (tile.dataset.thumbnailSource !== source) {
         replaceGalleryThumbnail(tile, source);
@@ -212,10 +225,7 @@ function updateGalleryItems(preserveAnchor = true) {
     empty.className = 'empty';
     empty.textContent = t('noMedia');
     reconcileGalleryChildren(gallery, [empty]);
-  } else if (state.layout === 'river' && geometryChanged) {
-    // Lay out the retained nodes in this turn, before the browser can paint.
-    layoutRiverGallery(tiles);
-  } else if (state.layout !== 'river' && geometryChanged) {
+  } else if (geometryChanged) {
     tiles.forEach(tile => {
       tile.style.removeProperty('width');
       tile.style.removeProperty('height');
@@ -224,17 +234,6 @@ function updateGalleryItems(preserveAnchor = true) {
   }
   $$(':scope > .error', gallery).forEach(error => error.remove());
   bindGalleryThumbnails(gallery);
-  if (state.layout === 'river' && !state.galleryObserver) {
-    if ('ResizeObserver' in window) {
-      state.galleryObserver = new ResizeObserver(entries => {
-        const width = entries[0]?.contentRect.width || 0;
-        if (Math.abs(width - state.galleryWidth) < 0.5) return;
-        state.galleryWidth = width;
-        scheduleRiverLayout();
-      });
-      state.galleryObserver.observe(gallery);
-    }
-  }
   restoreGalleryPosition(position);
   updateGallerySummary();
 }
@@ -267,11 +266,11 @@ function updateGallerySummary() {
 }
 
 function galleryAspectRatio(item) {
-  return item.kind === 'video'
-    ? 1
-    : Number(item.width) > 0 && Number(item.height) > 0
-    ? Number(item.width) / Number(item.height)
-    : state.aspectRatios.get(item.id) || 4 / 3;
+  if (item.kind === 'video') return 1;
+  const decodedRatio = state.aspectRatioVersions.get(item.id) === mediaContentVersion(item)
+    ? state.aspectRatios.get(item.id) : null;
+  return decodedRatio || (Number(item.width) > 0 && Number(item.height) > 0
+    ? Number(item.width) / Number(item.height) : 4 / 3);
 }
 
 function tileHTML(item) {
@@ -326,6 +325,7 @@ function bindGalleryThumbnails(gallery) {
       if (!image.naturalWidth || !image.naturalHeight || $('img[data-thumbnail-pending]', tile)) return;
       const ratio = image.naturalWidth / image.naturalHeight;
       state.aspectRatios.set(tile.dataset.id, ratio);
+      state.aspectRatioVersions.set(tile.dataset.id, tile.dataset.contentVersion);
       if (tile.dataset.kind !== 'video' && Math.abs(Number(tile.dataset.aspectRatio) - ratio) > 0.001) {
         tile.dataset.aspectRatio = String(ratio);
         scheduleRiverLayout();
@@ -340,54 +340,188 @@ function bindGalleryThumbnails(gallery) {
   });
 }
 
+// River geometry is calculated for the complete sorted list, but only rows near
+// the viewport become DOM nodes. The exact existing row-breaking algorithm is kept.
+function updateRiverGallery(preserveAnchor = true) {
+  const gallery = $('#gallery');
+  if (!gallery || !window.NasPhotoLayout) return;
+  cancelAnimationFrame(state.galleryLayoutFrame);
+  state.galleryLayoutFrame = 0;
+  const ids = new Set(state.items.map(item => item.id));
+  const position = captureGalleryPosition(gallery, ids);
+  if (!preserveAnchor) position.anchor = null;
+
+  gallery.className = `gallery river size-${state.size}`;
+  const style = getComputedStyle(gallery);
+  const width = Math.max(1, gallery.clientWidth -
+    (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0));
+  const gap = parseFloat(style.getPropertyValue('--river-gap')) || 0;
+  const targetHeight = parseFloat(style.getPropertyValue('--river-target-height')) || 180;
+  const rows = window.NasPhotoLayout.computeJustifiedRows(
+    state.items.map(galleryAspectRatio), width, targetHeight, gap);
+  const totalHeight = window.NasPhotoLayout.positionJustifiedRows(rows, gap);
+  state.galleryRiverGeometry = {
+    rows, totalHeight, gap, paddingTop: parseFloat(style.paddingTop) || 0
+  };
+  state.galleryMeasuredWidth = gallery.clientWidth;
+  state.galleryRiverVersion++;
+  state.galleryRiverRange = null;
+
+  if (!rows.length) {
+    const empty = gallery.querySelector(':scope > .empty') || document.createElement('p');
+    empty.className = 'empty';
+    empty.textContent = t('noMedia');
+    reconcileGalleryChildren(gallery, [empty]);
+  } else {
+    // Publish the new complete height first. Otherwise window.scrollTo() can
+    // clamp to the *old* scroll range when fresh items were inserted above us.
+    renderVisibleRiverRows(true);
+    // The old first visible photo, not an index, is the stable refresh anchor.
+    // This also works when that photo is removed from the DOM by virtualization.
+    if (position.anchor) {
+      const id = position.anchor.tile.dataset.id;
+      const index = state.items.findIndex(item => item.id === id);
+      const row = window.NasPhotoLayout.justifiedRowForItem(rows, index);
+      if (row) {
+        const galleryTop = gallery.getBoundingClientRect().top + window.scrollY;
+        const scrollY = Math.max(0, galleryTop + state.galleryRiverGeometry.paddingTop +
+          row.top - position.anchor.offset);
+        if (document.body.classList.contains('viewer-open')) {
+          if (Math.abs(state.viewerScrollY - scrollY) > 0.5) {
+            state.viewerScrollY = scrollY;
+            renderVisibleRiverRows();
+          }
+        } else if (Math.abs(window.scrollY - scrollY) > 0.5) {
+          window.scrollTo({top: scrollY, left: window.scrollX, behavior: 'instant'});
+          renderVisibleRiverRows();
+        }
+      }
+    }
+  }
+  if (position.focus && !position.focus.isConnected) {
+    const focusedId = position.focus.closest('.tile')?.dataset.id;
+    const replacement = focusedId && gallery.querySelector(
+      `.tile[data-id="${CSS.escape(focusedId)}"]`);
+    replacement?.focus({preventScroll: true});
+  }
+  updateGallerySummary();
+
+  if (!state.galleryObserver && 'ResizeObserver' in window) {
+    state.galleryObserver = new ResizeObserver(() => {
+      if (!gallery.isConnected || state.layout !== 'river') return;
+      if (Math.abs(gallery.clientWidth - state.galleryMeasuredWidth) < 0.5) return;
+      scheduleRiverLayout();
+    });
+    state.galleryObserver.observe(gallery);
+  }
+}
+
 function scheduleRiverLayout() {
   if (state.layout !== 'river') return;
   cancelAnimationFrame(state.galleryLayoutFrame);
   state.galleryLayoutFrame = requestAnimationFrame(() => {
-    const gallery = $('#gallery');
-    if (!gallery) return;
-    const position = captureGalleryPosition(gallery);
-    layoutRiverGallery();
-    restoreGalleryPosition(position);
+    state.galleryLayoutFrame = 0;
+    updateRiverGallery();
   });
 }
 
-function layoutRiverGallery(tiles = null) {
-  state.galleryLayoutFrame = 0;
+function scheduleRiverWindow() {
+  if (state.layout !== 'river' || state.galleryRenderFrame) return;
+  state.galleryRenderFrame = requestAnimationFrame(() => {
+    state.galleryRenderFrame = 0;
+    renderVisibleRiverRows();
+  });
+}
+
+function renderVisibleRiverRows(force = false) {
   const gallery = $('#gallery');
-  if (!gallery || state.layout !== 'river' || !window.NasPhotoLayout) return;
-  tiles ||= [...gallery.querySelectorAll('.tile')];
-  if (!tiles.length) return;
+  const geometry = state.galleryRiverGeometry;
+  if (!gallery || !geometry?.rows.length || state.layout !== 'river') return;
+  const {rows, gap, totalHeight, paddingTop} = geometry;
+  const galleryTop = gallery.getBoundingClientRect().top + window.scrollY + paddingTop;
+  const scrollY = document.body.classList.contains('viewer-open')
+    ? state.viewerScrollY : window.scrollY;
+  const overscan = Math.max(window.innerHeight * 1.5, 700);
+  const range = window.NasPhotoLayout.visibleJustifiedRows(
+    rows, scrollY - galleryTop - overscan,
+    scrollY - galleryTop + window.innerHeight + overscan);
+  if (!force && state.galleryRiverRange?.start === range.start &&
+      state.galleryRiverRange?.end === range.end &&
+      state.galleryRiverRange?.version === state.galleryRiverVersion) return;
 
-  const style = getComputedStyle(gallery);
-  const width = gallery.clientWidth -
-    (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0);
-  if (width <= 0) {
-    reconcileGalleryChildren(gallery, tiles);
-    return;
+  const previousRows = new Map(
+    [...gallery.querySelectorAll(':scope > .river-row')]
+      .map(row => [Number(row.dataset.riverIndex), row]));
+  const existingTiles = new Map(
+    [...gallery.querySelectorAll('.tile')].map(tile => [tile.dataset.id, tile]));
+  const desired = [];
+
+  if (range.start > 0) {
+    const spacer = gallery.querySelector(':scope > .river-spacer-start') ||
+      document.createElement('div');
+    spacer.className = 'river-spacer river-spacer-start';
+    spacer.style.height = `${rows[range.start].top}px`;
+    spacer.setAttribute('aria-hidden', 'true');
+    desired.push(spacer);
   }
-  state.galleryWidth = width;
-  const targetHeight = parseFloat(style.getPropertyValue('--river-target-height')) || 180;
-  const gap = parseFloat(style.getPropertyValue('--river-gap')) || 0;
-  const ratios = tiles.map(tile => Number(tile.dataset.aspectRatio) || 4 / 3);
-  const rows = window.NasPhotoLayout.computeJustifiedRows(ratios, width, targetHeight, gap);
-  const existingRows = [...gallery.querySelectorAll(':scope > .river-row')];
-  const content = [];
 
-  rows.forEach((row, rowIndex) => {
-    const rowElement = existingRows[rowIndex] || document.createElement('div');
-    rowElement.className = `river-row${row.justified ? ' justified' : ''}`;
-    rowElement.style.gap = `${row.gap}px`;
-    for (let index = row.start; index < row.end; index += 1) {
-      const tile = tiles[index];
+  for (let rowIndex = range.start; rowIndex < range.end; rowIndex++) {
+    const row = rows[rowIndex];
+    const element = previousRows.get(rowIndex) || document.createElement('div');
+    element.className = `river-row${row.justified ? ' justified' : ''}`;
+    element.dataset.riverIndex = String(rowIndex);
+    element.style.gap = `${row.gap}px`;
+    element.style.marginBottom = rowIndex + 1 === rows.length ? '0px' : `${gap}px`;
+    const tiles = [];
+    for (let index = row.start; index < row.end; index++) {
+      const item = state.items[index];
+      let tile = existingTiles.get(item.id);
+      if (!tile || tile.dataset.kind !== item.kind) {
+        const template = document.createElement('template');
+        template.innerHTML = tileHTML(item).trim();
+        tile = template.content.firstElementChild;
+      } else {
+        if (tile.getAttribute('aria-label') !== item.name) tile.setAttribute('aria-label', item.name);
+        if (tile.dataset.tooltip !== t('mediaTip')) tile.dataset.tooltip = t('mediaTip');
+        const contentVersion = mediaContentVersion(item);
+        if (tile.dataset.contentVersion !== contentVersion) {
+          tile.dataset.contentVersion = contentVersion;
+          state.aspectRatios.delete(item.id);
+          state.aspectRatioVersions.delete(item.id);
+        }
+        const source = mediaThumbnailURL(item);
+        if (tile.dataset.thumbnailSource !== source) replaceGalleryThumbnail(tile, source);
+      }
+      tile.dataset.aspectRatio = String(galleryAspectRatio(item));
       tile.style.width = `${Math.max(1, row.widths[index - row.start])}px`;
       tile.style.height = `${Math.max(1, row.height)}px`;
+      tiles.push(tile);
     }
-    reconcileGalleryChildren(rowElement, tiles.slice(row.start, row.end));
-    content.push(rowElement);
-  });
-  reconcileGalleryChildren(gallery, content);
+    reconcileGalleryChildren(element, tiles);
+    desired.push(element);
+  }
+
+  if (range.end < rows.length) {
+    const spacer = gallery.querySelector(':scope > .river-spacer-end') ||
+      document.createElement('div');
+    spacer.className = 'river-spacer river-spacer-end';
+    const lastRow = rows[range.end - 1];
+    spacer.style.height = `${Math.max(0, totalHeight - lastRow.bottom - gap)}px`;
+    spacer.setAttribute('aria-hidden', 'true');
+    desired.push(spacer);
+  }
+  reconcileGalleryChildren(gallery, desired);
+  state.galleryRiverRange = {...range, version: state.galleryRiverVersion};
+  bindGalleryThumbnails(gallery);
 }
+
+window.addEventListener('scroll', scheduleRiverWindow, {passive: true});
+window.addEventListener('resize', () => {
+  const gallery = $('#gallery');
+  if (!gallery || state.layout !== 'river') return;
+  if (Math.abs(gallery.clientWidth - state.galleryMeasuredWidth) > 0.5) scheduleRiverLayout();
+  else scheduleRiverWindow();
+}, {passive: true});
 
 function connectGalleryShell() {
   const gallery = $('#gallery');

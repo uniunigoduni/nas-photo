@@ -537,38 +537,38 @@ func TestViewerKeepsGalleryMountedWhenOpenedAndClosed(t *testing.T) {
 	}
 }
 
-func TestRiverGalleryDoesNotRelayoutForEveryThumbnail(t *testing.T) {
+func TestRiverGalleryVirtualizesRowsAndKeepsExistingLayout(t *testing.T) {
 	source := webJavaScript(t)
-	if !strings.Contains(source, "updateGalleryItems(offset > 0)") ||
-		!strings.Contains(source, "gallery.insertAdjacentHTML('beforeend'") {
-		t.Fatal("additional media pages still rebuild the existing gallery")
+	for _, feature := range []string{
+		"function updateRiverGallery(preserveAnchor = true)",
+		"function renderVisibleRiverRows(force = false)",
+		"window.NasPhotoLayout.computeJustifiedRows(",
+		"window.NasPhotoLayout.positionJustifiedRows(",
+		"window.NasPhotoLayout.visibleJustifiedRows(",
+		"window.NasPhotoLayout.justifiedRowForItem(",
+		"river-spacer-start", "river-spacer-end",
+		"window.addEventListener('scroll', scheduleRiverWindow",
+		"state.galleryRiverRange", "state.aspectRatioVersions.set(",
+		"if (item.kind === 'video') return 1;",
+	} {
+		if !strings.Contains(source, feature) {
+			t.Fatalf("virtual river gallery missing %q", feature)
+		}
 	}
-	if !strings.Contains(source, "gallery.classList.contains('river-pending')") ||
-		!strings.Contains(source, "gallery.classList.remove('river-pending')") {
-		t.Fatal("initial river layout is not hidden until its dimensions are ready")
+	if strings.Contains(source, "function layoutRiverGallery(tiles = null)") {
+		t.Fatal("river gallery still creates all rows in the DOM")
 	}
-	updateStart := strings.Index(source, "const updateRatio = () =>")
-	if updateStart < 0 {
-		t.Fatal("could not locate thumbnail ratio handling")
+	layout := readWebAssetSet(t, "web/layout.js")
+	for _, feature := range []string{"function positionJustifiedRows(", "function visibleJustifiedRows(", "function justifiedRowForItem("} {
+		if !strings.Contains(layout, feature) {
+			t.Fatalf("row geometry helper missing %q", feature)
+		}
 	}
-	errorStart := strings.Index(source[updateStart:], "image.addEventListener('error'")
-	if errorStart < 0 {
-		t.Fatal("could not locate thumbnail ratio handling")
-	}
-	updateSource := source[updateStart : updateStart+errorStart]
-	if strings.Contains(updateSource, "scheduleRiverLayout()") {
-		t.Fatal("each thumbnail still triggers a visible river relayout")
-	}
-	styles, err := assets.ReadFile("web/base.css")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(styles), "scrollbar-gutter: stable") {
-		t.Fatal("scrollbar appearance can still change the river layout width")
-	}
-	if !strings.Contains(source, "const knownRatio = item.kind === 'video'") ||
-		!strings.Contains(source, "tile.dataset.kind !== 'video'") {
-		t.Fatal("video tiles are not kept square in the river layout")
+	css := readWebAssetSet(t, "web/gallery.css")
+	for _, feature := range []string{".river-spacer {", "overflow-anchor: none;"} {
+		if !strings.Contains(css, feature) {
+			t.Fatalf("virtual river CSS missing %q", feature)
+		}
 	}
 }
 
@@ -979,10 +979,10 @@ func TestFrontendFeatureScriptsBootAfterAllDependencies(t *testing.T) {
 func TestGalleryAndViewerUseDedicatedLifecyclePaths(t *testing.T) {
 	gallery := readWebAssetSet(t, "web/gallery.js")
 	for _, expected := range []string{
-		"function updateGalleryItems(append = false)",
+		"function updateGalleryItems(preserveAnchor = true)",
 		"function connectGalleryShell()",
 		"gallery.onclick = event =>",
-		"updateGalleryItems(offset > 0)",
+		"updateGalleryItems();",
 		"return refreshGalleryItems()",
 	} {
 		if !strings.Contains(gallery, expected) {
@@ -1020,7 +1020,7 @@ func TestGalleryViewerMotionIsIndependentFromM3E(t *testing.T) {
 		"--nas-gallery-tile-effect-motion:",
 		"--nas-gallery-image-reveal-duration: 140ms",
 		"--nas-viewer-controls-fade-motion:",
-		"--nas-gallery-view-transition-duration:",
+		"--nas-gallery-photo-morph-duration:",
 	} {
 		if !strings.Contains(gallery+viewer, expected) {
 			t.Fatalf("gallery/viewer motion owner is missing %q", expected)

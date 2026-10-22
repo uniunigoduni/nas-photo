@@ -2,7 +2,9 @@
   "name": "nas-photo-web",
   "private": true,
   "scripts": {
-    "build:web": "node scripts/build-m3e.mjs"
+    "build:web": "node scripts/build-m3e.mjs",
+    "test:layout": "node --test scripts/test-layout.mjs",
+    "test:viewer-transition": "node --test scripts/test-viewer-transition.mjs"
   },
   "dependencies": {
     "@m3e/icons": "1.0.14",

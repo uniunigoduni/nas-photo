@@ -33,6 +33,12 @@ jobs:
           go test ./...
           go vet ./...
 
+      - name: Test web gallery and media transitions
+        run: |
+          node --check cmd/nas-photo/web/gallery.js
+          node --check cmd/nas-photo/web/viewer.js
+          node --test scripts/test-layout.mjs scripts/test-viewer-transition.mjs
+
       - name: Build two release executables
         run: |
           mkdir -p dist
