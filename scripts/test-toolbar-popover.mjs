@@ -24,7 +24,7 @@ test('safe triangle preserves a diagonal route from trigger to its floating pane
 
 test('immediate hover, outside click and keyboard dismissal are implemented without animation layers', () => {
   assert.doesNotMatch(source, /TOOLBAR_HOVER_DELAY|TOOLBAR_HIDE_DELAY|setTimeout/);
-  assert.match(source, /leaveToolbarSurface\(anchor, false, event\)/);
+  assert.match(source, /leaveToolbarSurface\(group, false, event\)/);
   assert.match(source, /new WeakMap\(\)/);
   assert.match(source, /inToolbarTriangle\(\{x: event\.clientX, y: event\.clientY\}\)/);
   assert.match(source, /toolbarPopup\.panel\.disableClose/);
@@ -89,9 +89,9 @@ test('scan uses a vertical intrinsic-width list and toolbar stays left of settin
   const shell = fs.readFileSync(new URL('../cmd/nas-photo/web/shell.css', import.meta.url), 'utf8');
   assert.match(css, /\.toolbar-popup\[popover\]\.action-dialog \.option-choice-grid\s*\{[^}]*display:\s*grid/);
   assert.match(css, /grid-template-columns:\s*minmax\(0, max-content\)/);
-  assert.match(shell, /\.top-actions\s*\{[^}]*justify-content:\s*flex-end/);
+  assert.match(shell, /\.top-actions\s*\{[^}]*justify-content:\s*flex-start/);
   assert.match(shell, /\.top-actions\s*\{[^}]*margin-left:\s*auto/);
-  assert.match(shell, /#settings\s*\{[^}]*grid-row:\s*2/);
+  assert.match(shell, /\.top-toolbar\s*\{[^}]*border-radius:\s*999px/);
 });
 test('settings layout reserves real button ink overflow instead of hiding scrollbar tracks', () => {
   const css = fs.readFileSync(new URL('../cmd/nas-photo/web/dialogs.css', import.meta.url), 'utf8');
@@ -110,15 +110,41 @@ test('first opening and resized content are measured before being painted', () =
   assert.ok(source.indexOf("panel.setAttribute('data-positioning', '')") < source.indexOf('panel.showPopover()'));
   assert.match(source, /const size = panel\.getBoundingClientRect\(\)/);
   assert.match(source, /panel\.style\.maxHeight = 'none'/);
-  assert.match(source, /positionToolbarPopup\(panel, toolbarPopup\.anchor\);\s*panel\.removeAttribute\('data-positioning'\)/);
+  assert.match(source, /positionToolbarPopup\(panel, anchor\);\s*panel\.removeAttribute\('data-positioning'\)/);
   assert.match(source, /toolbarResizeObserver = new ResizeObserver\(queueToolbarPosition\)/);
   assert.match(source, /toolbarMutationObserver = new MutationObserver\(queueToolbarPosition\)/);
 });
 test('toolbar controls remain available to mouse, touch and keyboard users', () => {
-  assert.match(source, /anchor\.addEventListener\('pointerenter'/);
+  assert.match(source, /group\.addEventListener\('pointerover'/);
   assert.match(source, /anchor\.addEventListener\('keydown'/);
   assert.match(source, /event\.key === 'ArrowDown'/);
   assert.match(source, /anchor\.onclick =/);
   assert.match(source, /removeAttribute\('data-tooltip'\)/);
-  assert.match(source, /if \(toolbarPopup\?\.anchor === anchor\) closeToolbarPopup\(\)/);
+  assert.match(source, /toolbarSuppressedAnchor = anchor/);
+});
+
+test('one capsule owns every contiguous pointer segment with no dead gaps', () => {
+  const shell = fs.readFileSync(new URL('../cmd/nas-photo/web/shell.css', import.meta.url), 'utf8');
+  const gallery = fs.readFileSync(new URL('../cmd/nas-photo/web/gallery.js', import.meta.url), 'utf8');
+  const group = shell.match(/\.top-actions\s*\{([^}]*)\}/)?.[1] || '';
+  assert.match(group, /gap:\s*0/);
+  assert.match(group, /flex-wrap:\s*nowrap/);
+  assert.match(shell, /\.toolbar-segment\s*\{[^}]*padding:/);
+  assert.match(shell, /\.top-toolbar\s*\{[^}]*border-radius:\s*999px/);
+  assert.match(gallery, /role="toolbar"/);
+  assert.equal((gallery.match(/data-toolbar-segment=/g) || []).length, 5);
+  assert.match(gallery, /bindToolbarGroup\(\$\('\.top-toolbar'\)\)/);
+  assert.match(source, /function toolbarAnchorAt\(event\)/);
+  assert.match(source, /group\.addEventListener\('pointermove'/);
+  assert.doesNotMatch(source, /anchor\.addEventListener\('pointerenter'/);
+});
+
+test('popover is positioned synchronously with no hover animation frame', () => {
+  const start = source.indexOf('function openToolbarPopup(');
+  const end = source.indexOf('function openToolbarFromAnchor(', start);
+  const opening = source.slice(start, end);
+  assert.ok(opening.indexOf('panel.showPopover()') < opening.indexOf('positionToolbarPopup(panel, anchor)'));
+  assert.ok(opening.indexOf('positionToolbarPopup(panel, anchor)') < opening.indexOf("panel.removeAttribute('data-positioning')"));
+  assert.doesNotMatch(opening, /requestAnimationFrame|setTimeout/);
+  assert.doesNotMatch(source, /requestAnimationFrame|setTimeout/);
 });

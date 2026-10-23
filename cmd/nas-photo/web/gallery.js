@@ -25,13 +25,13 @@ async function showGallery() {
     <p class="notice job-status" id="job-status" hidden></p>
     <header class="top-shell"><div class="top-layout">
       <strong class="top-title">NAS-PHOTO</strong>
-      <div class="top top-actions" aria-label="NAS-PHOTO">
-        <m3e-button variant="tonal" size="small" id="sort-menu" data-tooltip="${t('sortTip')}"><m3e-icon slot="icon" name="sort"></m3e-icon>${t('sort')}</m3e-button>
-        <m3e-button variant="tonal" size="small" id="view-menu" data-tooltip="${t('viewTip')}"><m3e-icon slot="icon" name="grid_view"></m3e-icon>${t('view')}</m3e-button>
-        <m3e-button variant="tonal" size="small" id="filter-menu" data-tooltip="${t('filterTip')}"><m3e-icon slot="icon" name="filter_alt"></m3e-icon>${t('filter')}</m3e-button>
-        <m3e-button variant="tonal" size="small" id="scan-menu" data-tooltip="${t('rescanTip')}"><m3e-icon slot="icon" name="sync"></m3e-icon>${t('rescan')}</m3e-button>
+      <div class="top top-actions top-toolbar" role="toolbar" aria-label="NAS-PHOTO">
+        <div class="toolbar-segment" data-toolbar-segment="sort-menu"><m3e-button variant="tonal" size="small" id="sort-menu" aria-label="${t('sort')}" data-tooltip="${t('sortTip')}"><m3e-icon slot="icon" name="sort"></m3e-icon><span class="toolbar-label">${t('sort')}</span></m3e-button></div>
+        <div class="toolbar-segment" data-toolbar-segment="view-menu"><m3e-button variant="tonal" size="small" id="view-menu" aria-label="${t('view')}" data-tooltip="${t('viewTip')}"><m3e-icon slot="icon" name="grid_view"></m3e-icon><span class="toolbar-label">${t('view')}</span></m3e-button></div>
+        <div class="toolbar-segment" data-toolbar-segment="filter-menu"><m3e-button variant="tonal" size="small" id="filter-menu" aria-label="${t('filter')}" data-tooltip="${t('filterTip')}"><m3e-icon slot="icon" name="filter_alt"></m3e-icon><span class="toolbar-label">${t('filter')}</span></m3e-button></div>
+        <div class="toolbar-segment" data-toolbar-segment="scan-menu"><m3e-button variant="tonal" size="small" id="scan-menu" aria-label="${t('rescan')}" data-tooltip="${t('rescanTip')}"><m3e-icon slot="icon" name="sync"></m3e-icon><span class="toolbar-label">${t('rescan')}</span></m3e-button></div>
+        <div class="toolbar-segment toolbar-segment-settings" data-toolbar-segment="settings"><m3e-icon-button variant="tonal" size="small" id="settings" aria-label="${t('settings')}" data-tooltip="${t('settingsTip')}"><m3e-icon name="settings"></m3e-icon></m3e-icon-button></div>
       </div>
-      <m3e-icon-button variant="tonal" size="small" id="settings" aria-label="${t('settings')}" data-tooltip="${t('settingsTip')}"><m3e-icon name="settings"></m3e-icon></m3e-icon-button>
     </div></header>
     <div class="selection-summary" id="selection-summary"></div>
     <main class="gallery ${state.layout} size-${state.size}" id="gallery"><p class="empty">${t('loading')}</p></main>`;
@@ -525,6 +525,7 @@ window.addEventListener('resize', () => {
 }, {passive: true});
 
 function connectGalleryShell() {
+  bindToolbarGroup($('.top-toolbar'));
   const gallery = $('#gallery');
   if (gallery) gallery.onclick = event => {
     const tile = event.target.closest('.tile');

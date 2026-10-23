@@ -233,7 +233,7 @@ func TestGalleryHeaderShowsTitleIconsAndSettings(t *testing.T) {
 	source := webJavaScript(t)
 	for _, feature := range []string{
 		`<strong class="top-title">NAS-PHOTO</strong>`,
-		`<div class="top top-actions" aria-label="NAS-PHOTO"`,
+		`<div class="top top-actions top-toolbar" role="toolbar" aria-label="NAS-PHOTO"`,
 		`<m3e-icon slot="icon" name="sort"></m3e-icon>`,
 		`<m3e-icon slot="icon" name="grid_view"></m3e-icon>`,
 		`<m3e-icon slot="icon" name="filter_alt"></m3e-icon>`,

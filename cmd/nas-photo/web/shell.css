@@ -112,18 +112,38 @@
   font: var(--nas-type-title-medium, 700 1rem/1.5 system-ui);
 }
 
-.top-actions {
+.top.top-actions {
   display: flex;
-  flex: 0 1 auto;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: .35rem;
-  width: auto;
+  flex: 0 0 auto;
+  align-items: stretch;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  gap: 0;
+  width: max-content;
+  max-width: 100%;
   min-width: 0;
   margin-left: auto;
 }
-
+.top-toolbar {
+  padding: .15rem;
+  border-radius: 999px;
+  background: var(--nas-color-surface-container, #151d31);
+}
+.toolbar-segment {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  padding: .14rem .2rem;
+  min-width: 0;
+}
+.toolbar-segment m3e-button,
+.toolbar-segment m3e-icon-button {
+  flex: 0 0 auto;
+}
+.toolbar-segment-settings {
+  border-inline-start: 1px solid var(--nas-color-outline-variant, #48546a);
+}
 #settings {
   flex: 0 0 auto;
 }
@@ -148,40 +168,17 @@ m3e-linear-progress-indicator.progress {
 }
 
 @media (max-width: 900px) {
-  .top-shell {
-    padding: .4rem;
-  }
-  .top-layout {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: .4rem .5rem;
-  }
-  .top-title {
-    grid-column: 1;
-    grid-row: 1;
-    align-self: center;
-  }
-  #settings {
-    grid-column: 2;
-    grid-row: 2;
-    align-self: center;
-  }
-  .top {
-    grid-column: 1;
-    grid-row: 2;
-    width: 100%;
-    justify-content: flex-end;
+  .top-shell { padding: .4rem; }
+  .top-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: .4rem; }
+  .top-title { grid-column: 1; grid-row: 1; align-self: center; }
+  .top-actions { grid-column: 1; grid-row: 2; justify-self: end; }
+}
+@media (max-width: 480px) {
+  .toolbar-label { display: none; }
+  .toolbar-segment { padding-inline: .16rem; }
+  .top-toolbar .toolbar-segment m3e-button {
+    width: 40px;
+    min-width: 40px;
+    max-width: 40px;
   }
 }
-
-@media (max-width: 520px) {
-  .top-actions {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .top-actions m3e-button {
-    width: 100%;
-    min-width: 0;
-  }
-}
-

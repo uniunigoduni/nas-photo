@@ -7,7 +7,9 @@ let toolbarBindingsInstalled = false;
 let toolbarPanelSequence = 0;
 let toolbarResizeObserver = null;
 let toolbarMutationObserver = null;
-let toolbarPositionFrame = 0;
+let toolbarPositioning = false;
+let toolbarGroup = null;
+let toolbarSuppressedAnchor = null;
 const toolbarOpeners = new WeakMap();
 
 function toolbarPointerLeavesToward(source, destination, event) {
@@ -29,7 +31,7 @@ function toolbarPointerLeavesToward(source, destination, event) {
 
 function inToolbarTriangle(point) {
   if (!toolbarPopup || !toolbarApex || !point) return false;
-  const destination = toolbarApex.toAnchor ? toolbarPopup.anchor : toolbarPopup.panel;
+  const destination = toolbarApex.toAnchor ? toolbarGroup : toolbarPopup.panel;
   const rect = destination.getBoundingClientRect();
   const edgeY = rect.top >= toolbarApex.y ? rect.top : rect.bottom;
   if ((edgeY - toolbarApex.y) * (point.y - toolbarApex.y) < 0) return false;
@@ -96,16 +98,18 @@ function positionToolbarPopup(panel, anchor) {
   panel.style.top = placement.top + 'px';
 }
 function queueToolbarPosition() {
-  if (toolbarPositionFrame || !toolbarPopup) return;
-  const panel = toolbarPopup.panel;
-  // A content/viewport size change cannot paint at the old coordinates.
+  if (!toolbarPopup || toolbarPositioning) return;
+  const {panel, anchor} = toolbarPopup;
+  toolbarPositioning = true;
   panel.setAttribute('data-positioning', '');
-  toolbarPositionFrame = requestAnimationFrame(() => {
-    toolbarPositionFrame = 0;
-    if (toolbarPopup?.panel !== panel) return;
-    positionToolbarPopup(panel, toolbarPopup.anchor);
+  try {
+    // Mutation and resize observers run before paint. Reposition in the same
+    // callback rather than waiting for another animation frame.
+    positionToolbarPopup(panel, anchor);
+  } finally {
     panel.removeAttribute('data-positioning');
-  });
+    toolbarPositioning = false;
+  }
 }
 
 function closeToolbarPopup(panel = toolbarPopup?.panel) {
@@ -115,8 +119,6 @@ function closeToolbarPopup(panel = toolbarPopup?.panel) {
     toolbarMutationObserver?.disconnect();
     toolbarResizeObserver = null;
     toolbarMutationObserver = null;
-    cancelAnimationFrame(toolbarPositionFrame);
-    toolbarPositionFrame = 0;
   }
   if (toolbarPopup?.panel === panel) {
     toolbarPopup.anchor.setAttribute('aria-expanded', 'false');
@@ -130,8 +132,8 @@ function closeToolbarPopup(panel = toolbarPopup?.panel) {
 
 function leaveToolbarSurface(source, toAnchor, event) {
   if (event.pointerType && event.pointerType !== 'mouse') return;
-  if (!toolbarPopup || (toAnchor ? toolbarPopup.panel : toolbarPopup.anchor) !== source) return;
-  const destination = toAnchor ? toolbarPopup.anchor : toolbarPopup.panel;
+  if (!toolbarPopup || (toAnchor ? toolbarPopup.panel : toolbarGroup) !== source) return;
+  const destination = toAnchor ? toolbarGroup : toolbarPopup.panel;
   const point = {x: event.clientX, y: event.clientY};
   if (!toAnchor && inToolbarTriangle(point)) return;
   if (toolbarPointerLeavesToward(source, destination, event)) {
@@ -153,7 +155,8 @@ function openToolbarPopup(panel, anchor, focusFirst = false) {
   toolbarPopup = {panel, anchor};
   anchor.setAttribute('aria-expanded', 'true');
   anchor.setAttribute('aria-controls', panel.id);
-  queueToolbarPosition();
+  positionToolbarPopup(panel, anchor);
+  panel.removeAttribute('data-positioning');
   toolbarResizeObserver = new ResizeObserver(queueToolbarPosition);
   toolbarResizeObserver.observe(panel);
   toolbarMutationObserver = new MutationObserver(queueToolbarPosition);
@@ -174,12 +177,45 @@ function openToolbarFromAnchor(anchor, focusFirst = false) {
 
 function hoverToolbarAnchor(anchor, event) {
   if (event.pointerType && event.pointerType !== 'mouse') return;
-  if (toolbarPopup?.anchor !== anchor &&
-      inToolbarTriangle({x: event.clientX, y: event.clientY})) return;
+  if (toolbarSuppressedAnchor === anchor) return;
+  toolbarSuppressedAnchor = null;
   openToolbarFromAnchor(anchor);
-  if (toolbarPopup?.anchor === anchor) {
-    toolbarApex = {x: event.clientX, y: event.clientY, toAnchor: false};
+}
+function toolbarAnchorAt(event) {
+  if (!toolbarGroup?.contains(event.target)) return null;
+  const segment = event.target.closest?.('[data-toolbar-segment]');
+  if (segment) return segment.querySelector('[data-toolbar-menu]');
+  // The capsule's outer padding is still a hit target. Assign it to the
+  // closest segment instead of leaving dead space around the end caps.
+  let nearest = null, distance = Infinity;
+  for (const slot of toolbarGroup.querySelectorAll('[data-toolbar-segment]')) {
+    const rect = slot.getBoundingClientRect();
+    const dx = Math.max(rect.left - event.clientX, 0, event.clientX - rect.right);
+    if (dx < distance) {
+      distance = dx;
+      nearest = slot.querySelector('[data-toolbar-menu]');
+    }
   }
+  return nearest;
+}
+function bindToolbarGroup(group) {
+  if (!group) return;
+  toolbarGroup = group;
+  toolbarSuppressedAnchor = null;
+  installToolbarPopupListeners();
+  // One event owner for five contiguous hit regions. No individual hover
+  // timers, overlapping targets or empty gaps between buttons.
+  const onPointer = event => {
+    if (event.pointerType !== 'mouse') return;
+    const anchor = toolbarAnchorAt(event);
+    if (anchor) hoverToolbarAnchor(anchor, event);
+  };
+  group.addEventListener('pointerover', onPointer);
+  group.addEventListener('pointermove', onPointer, {passive: true});
+  group.addEventListener('pointerleave', event => {
+    toolbarSuppressedAnchor = null;
+    leaveToolbarSurface(group, false, event);
+  });
 }
 
 function installToolbarPopupListeners() {
@@ -196,11 +232,9 @@ function installToolbarPopupListeners() {
       toolbarApex = null;
       return;
     }
-    if (toolbarPopup.anchor.contains(target)) return;
+    if (toolbarGroup?.contains(target)) return;
     if (inToolbarTriangle({x: event.clientX, y: event.clientY})) return;
-    const nextAnchor = target.closest?.('[data-toolbar-menu]');
-    if (nextAnchor && toolbarOpeners.has(nextAnchor)) hoverToolbarAnchor(nextAnchor, event);
-    else closeToolbarPopup();
+    closeToolbarPopup();
   }, {passive: true});
   document.addEventListener('pointerdown', event => {
     if (!toolbarPopup) return;
@@ -246,8 +280,6 @@ function bindToolbarMenu(anchor, opener) {
   anchor.setAttribute('aria-haspopup', 'dialog');
   anchor.setAttribute('aria-expanded', 'false');
   anchor.removeAttribute('data-tooltip');
-  anchor.addEventListener('pointerenter', event => hoverToolbarAnchor(anchor, event));
-  anchor.addEventListener('pointerleave', event => leaveToolbarSurface(anchor, false, event));
   anchor.addEventListener('keydown', event => {
     if (event.key === 'ArrowDown') {
       event.preventDefault();
@@ -255,8 +287,13 @@ function bindToolbarMenu(anchor, opener) {
     }
   });
   anchor.onclick = () => {
-    // A menu already opened by hover closes on the FIRST click.
-    if (toolbarPopup?.anchor === anchor) closeToolbarPopup();
-    else openToolbarFromAnchor(anchor, true);
+    if (toolbarPopup?.anchor === anchor) {
+      closeToolbarPopup();
+      // The pointer is still over this segment; don't reopen until it leaves.
+      toolbarSuppressedAnchor = anchor;
+    } else {
+      toolbarSuppressedAnchor = null;
+      openToolbarFromAnchor(anchor, true);
+    }
   };
 }
