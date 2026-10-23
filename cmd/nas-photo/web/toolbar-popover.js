@@ -325,6 +325,14 @@ function bindToolbarMenu(anchor, opener) {
       :host([aria-expanded="true"]) .base {
         border-radius: ${shape} !important;
       }
+      /* Keep the pressed corner morph, but remove the short flash on tap.
+         Hover and keyboard focus indicators remain managed by M3E. */
+      m3e-ripple {
+        display: none !important;
+      }
+      m3e-state-layer {
+        --m3e-state-layer-pressed-opacity: 0% !important;
+      }
     `;
     root.append(style);
   }

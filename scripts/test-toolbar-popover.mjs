@@ -208,3 +208,14 @@ test('phone modal keeps only its opener expanded until closing or backdrop tap',
   assert.equal((dialogs.match(/return overlay;/g) || []).length, 3);
   assert.match(settings, /openMaterialDialog\(dialog, anchor, pinned\);\s*return dialog/);
 });
+
+test('toolbar removes press ripple and pressed flash without hiding hover or focus', () => {
+  const style = source.slice(source.indexOf('style.dataset.toolbarPressedStyle'), source.indexOf('root.append(style)', source.indexOf('style.dataset.toolbarPressedStyle')));
+  assert.ok(style.includes('m3e-ripple {'));
+  assert.ok(style.includes('display: none !important'));
+  assert.ok(style.includes('m3e-state-layer {'));
+  assert.ok(style.includes('--m3e-state-layer-pressed-opacity: 0% !important'));
+  assert.ok(!style.includes('--m3e-state-layer-hover-opacity'));
+  assert.ok(!style.includes('--m3e-state-layer-focus-opacity'));
+  assert.ok(style.includes('border-radius: ${shape} !important'));
+});
