@@ -181,7 +181,20 @@ function openToolbarFromAnchor(anchor, focusFirst = false) {
     closeToolbarPopup();
     // No anchor restores the original M3E modal, with backdrop dismissal
     // and its own scroll area (not the transient popover's scroll handler).
-    opener(null, false);
+    const dialog = opener(null, false);
+    if (!dialog || dialog.tagName !== 'M3E-DIALOG' || !dialog.open) return;
+    dialog.id ||= 'toolbar-modal-' + (++toolbarPanelSequence);
+    anchor.setAttribute('aria-expanded', 'true');
+    anchor.setAttribute('aria-controls', dialog.id);
+    // A modal can close via its button, backdrop, Escape or an action.
+    // Clear the pressed appearance as soon as closing begins.
+    const reset = () => {
+      if (anchor.getAttribute('aria-controls') !== dialog.id) return;
+      anchor.setAttribute('aria-expanded', 'false');
+      anchor.removeAttribute('aria-controls');
+    };
+    dialog.addEventListener('closing', reset, {once: true});
+    dialog.addEventListener('closed', reset, {once: true});
     return;
   }
   if (toolbarPopup?.anchor === anchor) return;
@@ -296,6 +309,27 @@ function bindToolbarMenu(anchor, opener) {
   anchor.setAttribute('aria-haspopup', 'dialog');
   anchor.setAttribute('aria-expanded', 'false');
   anchor.removeAttribute('data-tooltip');
+  // M3E paints its button inside a shadow root. Expand only that surface,
+  // not the host hit target or its measured toolbar segment: neighbor hover
+  // boundaries and the popup's anchor position stay completely stable.
+  const root = anchor.shadowRoot;
+  if (root && !root.querySelector('[data-toolbar-expanded-style]')) {
+    const style = document.createElement('style');
+    style.dataset.toolbarExpandedStyle = 'true';
+    style.textContent = `
+      .base {
+        transform-origin: center;
+        transition: transform 160ms cubic-bezier(.2, 0, 0, 1);
+      }
+      :host([aria-expanded="true"]) .base {
+        transform: scale(1.12, 1.10);
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .base { transition: none; }
+      }
+    `;
+    root.append(style);
+  }
   anchor.addEventListener('keydown', event => {
     if (event.key === 'ArrowDown') {
       event.preventDefault();

@@ -1,4 +1,4 @@
-const CACHE='nas-photo-shell-v54';
+const CACHE='nas-photo-shell-v55';
 const SHELL=['/','/index.html','/theme.css','/base.css','/scrollbars.css','/shell.css','/gallery.css','/dialogs.css','/viewer.css','/upload.css','/m3e.bundle.js','/layout.js','/core.js','/shell.js','/gallery.js','/dialogs.js','/toolbar-popover.js','/viewer.js','/viewer-state.js','/viewer-zoom.js','/viewer-gestures.js','/settings.js','/upload.js','/runtime.js','/manifest.webmanifest','/icon.svg'];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(SHELL))));
 self.addEventListener('activate',event=>event.waitUntil(

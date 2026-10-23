@@ -139,6 +139,7 @@ function showSortDialog(anchor = null, pinned = false) {
     await refreshGalleryItems();
   };
   openMaterialDialog(overlay, anchor, pinned);
+  return overlay;
 }
 
 function optionDialog(title, sections, initialValues, onSave, anchor = null, pinned = false) {
@@ -170,6 +171,7 @@ function optionDialog(title, sections, initialValues, onSave, anchor = null, pin
     await onSave(values);
   };
   openMaterialDialog(overlay, anchor, pinned);
+  return overlay;
 }
 
 function actionDialog(title, sections, onSelect, anchor = null, pinned = false) {
@@ -188,4 +190,5 @@ function actionDialog(title, sections, onSelect, anchor = null, pinned = false) 
   });
   $('#option-close', overlay).onclick = () => closeMaterialDialog(overlay);
   openMaterialDialog(overlay, anchor, pinned);
+  return overlay;
 }

@@ -186,3 +186,24 @@ test('mobile toolbar keeps labels and stacks labeled buttons without overflow', 
   assert.equal((gallery.match(/class="toolbar-label"/g) || []).length, 4);
   assert.match(gallery, /<strong class="top-title">NAS-PHOTO<\/strong>/);
 });
+
+test('opening a toolbar dialog expands its own button surface without moving its hit box', () => {
+  const shell = fs.readFileSync(new URL('../cmd/nas-photo/web/shell.css', import.meta.url), 'utf8');
+  assert.match(source, /style\.textContent = `[\s\S]*?:host\(\[aria-expanded="true"\]\) \.base \{[\s\S]*?transform: scale\(1\.12, 1\.10\)/);
+  assert.match(source, /root\.append\(style\)/);
+  assert.match(source, /prefers-reduced-motion: reduce/);
+  assert.match(shell, /\.toolbar-segment \[data-toolbar-menu\]\[aria-expanded="true"\]\s*\{[^}]*z-index:\s*1/);
+  assert.doesNotMatch(shell, /\.toolbar-segment \[data-toolbar-menu\]\[aria-expanded="true"\]\s*\{[^}]*transform:/);
+});
+test('phone modal keeps only its opener expanded until closing or backdrop tap', () => {
+  const mobileOpen = source.slice(source.indexOf('function openToolbarFromAnchor('), source.indexOf('function hoverToolbarAnchor('));
+  assert.match(mobileOpen, /const dialog = opener\(null, false\)/);
+  assert.match(mobileOpen, /anchor\.setAttribute\('aria-expanded', 'true'\)/);
+  assert.match(mobileOpen, /dialog\.addEventListener\('closing', reset, \{once: true\}\)/);
+  assert.match(mobileOpen, /dialog\.addEventListener\('closed', reset, \{once: true\}\)/);
+  assert.match(mobileOpen, /anchor\.removeAttribute\('aria-controls'\)/);
+  const dialogs = fs.readFileSync(new URL('../cmd/nas-photo/web/dialogs.js', import.meta.url), 'utf8');
+  const settings = fs.readFileSync(new URL('../cmd/nas-photo/web/settings.js', import.meta.url), 'utf8');
+  assert.equal((dialogs.match(/return overlay;/g) || []).length, 3);
+  assert.match(settings, /openMaterialDialog\(dialog, anchor, pinned\);\s*return dialog/);
+});

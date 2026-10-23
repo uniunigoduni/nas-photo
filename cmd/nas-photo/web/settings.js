@@ -9,6 +9,7 @@ function openSettingsDialog(anchor = null, pinned = false) {
   const dialog = createMaterialDialogShell('option-dialog settings-dialog', t('settings'), anchor);
   renderSettingsHome(dialog);
   openMaterialDialog(dialog, anchor, pinned);
+  return dialog;
 }
 
 function renderSettingsHome(dialog) {
