@@ -309,23 +309,21 @@ function bindToolbarMenu(anchor, opener) {
   anchor.setAttribute('aria-haspopup', 'dialog');
   anchor.setAttribute('aria-expanded', 'false');
   anchor.removeAttribute('data-tooltip');
-  // M3E paints its button inside a shadow root. Expand only that surface,
-  // not the host hit target or its measured toolbar segment: neighbor hover
-  // boundaries and the popup's anchor position stay completely stable.
+  // Preserve M3E's *actual pressed shape* while the dialog is open.
+  // On pointer down M3E morphs the small button from a capsule to an 8px
+  // rounded rectangle; it never scales the button. Match the component's
+  // own shape custom properties, leaving size and hit regions untouched.
   const root = anchor.shadowRoot;
-  if (root && !root.querySelector('[data-toolbar-expanded-style]')) {
+  if (root && !root.querySelector('[data-toolbar-pressed-style]')) {
+    const iconButton = anchor.localName === 'm3e-icon-button';
+    const shape = iconButton
+      ? 'var(--m3e-icon-button-small-shape-pressed-morph, var(--m3e-icon-button-shape-pressed-morph, 8px))'
+      : 'var(--m3e-button-small-shape-pressed-morph, var(--m3e-button-shape-pressed-morph, 8px))';
     const style = document.createElement('style');
-    style.dataset.toolbarExpandedStyle = 'true';
+    style.dataset.toolbarPressedStyle = 'true';
     style.textContent = `
-      .base {
-        transform-origin: center;
-        transition: transform 160ms cubic-bezier(.2, 0, 0, 1);
-      }
       :host([aria-expanded="true"]) .base {
-        transform: scale(1.12, 1.10);
-      }
-      @media (prefers-reduced-motion: reduce) {
-        .base { transition: none; }
+        border-radius: ${shape} !important;
       }
     `;
     root.append(style);

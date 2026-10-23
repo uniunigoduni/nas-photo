@@ -187,13 +187,14 @@ test('mobile toolbar keeps labels and stacks labeled buttons without overflow', 
   assert.match(gallery, /<strong class="top-title">NAS-PHOTO<\/strong>/);
 });
 
-test('opening a toolbar dialog expands its own button surface without moving its hit box', () => {
-  const shell = fs.readFileSync(new URL('../cmd/nas-photo/web/shell.css', import.meta.url), 'utf8');
-  assert.match(source, /style\.textContent = `[\s\S]*?:host\(\[aria-expanded="true"\]\) \.base \{[\s\S]*?transform: scale\(1\.12, 1\.10\)/);
-  assert.match(source, /root\.append\(style\)/);
-  assert.match(source, /prefers-reduced-motion: reduce/);
-  assert.match(shell, /\.toolbar-segment \[data-toolbar-menu\]\[aria-expanded="true"\]\s*\{[^}]*z-index:\s*1/);
-  assert.doesNotMatch(shell, /\.toolbar-segment \[data-toolbar-menu\]\[aria-expanded="true"\]\s*\{[^}]*transform:/);
+test('open toolbar keeps M3E actual pressed corner shape, not a scale', () => {
+  assert.ok(source.includes('style.dataset.toolbarPressedStyle'));
+  assert.ok(source.includes(':host([aria-expanded="true"]) .base'));
+  assert.ok(source.includes('--m3e-button-small-shape-pressed-morph'));
+  assert.ok(source.includes('--m3e-icon-button-small-shape-pressed-morph'));
+  assert.ok(source.includes('border-radius: ${shape} !important'));
+  assert.ok(source.includes('root.append(style)'));
+  assert.doesNotMatch(source, /transform: scale|transform-origin/);
 });
 test('phone modal keeps only its opener expanded until closing or backdrop tap', () => {
   const mobileOpen = source.slice(source.indexOf('function openToolbarFromAnchor('), source.indexOf('function hoverToolbarAnchor('));

@@ -141,12 +141,6 @@
 .toolbar-segment m3e-icon-button {
   flex: 0 0 auto;
 }
-/* The open button's expanded painted surface sits above its neighbors
-   without changing the capsule's layout or pointer-hit geometry. */
-.toolbar-segment [data-toolbar-menu][aria-expanded="true"] {
-  position: relative;
-  z-index: 1;
-}
 .toolbar-segment-settings {
   border-inline-start: 1px solid var(--nas-color-outline-variant, #48546a);
 }
