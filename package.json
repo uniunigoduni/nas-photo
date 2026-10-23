@@ -6,7 +6,8 @@
     "test:layout": "node --test scripts/test-layout.mjs",
     "test:viewer-transition": "node --test scripts/test-viewer-transition.mjs",
     "test:dialog-transition": "node --test scripts/test-dialog-transition.mjs",
-    "test:toolbar-popover": "node --test scripts/test-toolbar-popover.mjs"
+    "test:toolbar-popover": "node --test scripts/test-toolbar-popover.mjs",
+    "test:tooltip": "node --test scripts/test-tooltip-timing.mjs"
   },
   "dependencies": {
     "@m3e/icons": "1.0.14",

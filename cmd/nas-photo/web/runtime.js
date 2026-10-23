@@ -16,6 +16,9 @@ function installTooltipSystem() {
     const tooltip = document.createElement('m3e-tooltip');
     tooltip.dataset.nasPhotoTooltip = 'true';
     tooltip.setAttribute('for', button.id);
+    // M3E defaults to zero delay. Restore a deliberate hover pause for
+    // ordinary tooltips; toolbar menus remain immediate and separate.
+    tooltip.showDelay = 500;
     tooltip.position = 'above';
     const shortcutCode = button.dataset.shortcutAction ? state.shortcuts[button.dataset.shortcutAction] : button.dataset.shortcutLabel;
     const description = button.dataset.tooltip || button.getAttribute('aria-label') || button.textContent.replace(/\s+/g, ' ').trim();
