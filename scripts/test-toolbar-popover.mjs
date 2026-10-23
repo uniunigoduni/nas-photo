@@ -148,3 +148,29 @@ test('popover is positioned synchronously with no hover animation frame', () => 
   assert.doesNotMatch(opening, /requestAnimationFrame|setTimeout/);
   assert.doesNotMatch(source, /requestAnimationFrame|setTimeout/);
 });
+
+test('capsule outer surface is unfilled while segments remain interactive', () => {
+  const css = fs.readFileSync(new URL('../cmd/nas-photo/web/shell.css', import.meta.url), 'utf8');
+  const capsule = css.match(/\.top-toolbar\s*\{([^}]*)\}/)?.[1] || '';
+  assert.match(capsule, /background:\s*transparent/);
+});
+
+test('mobile uses a modal dialog with fixed width, desktop retains hover popovers', () => {
+  const dialogs = fs.readFileSync(new URL('../cmd/nas-photo/web/dialogs.js', import.meta.url), 'utf8');
+  const css = fs.readFileSync(new URL('../cmd/nas-photo/web/dialogs.css', import.meta.url), 'utf8');
+  assert.ok(source.includes("const MOBILE_TOOLBAR_QUERY = '(max-width: 767px)'"));
+  assert.ok(source.includes('opener(null, false)'));
+  assert.ok(source.includes('toolbarUsesModal()'));
+  assert.ok(source.includes('if (toolbarUsesModal() || (event.pointerType'));
+  assert.ok(dialogs.includes("document.createElement(anchor ? 'section' : 'm3e-dialog')"));
+  assert.ok(dialogs.includes('dialog.open = true'));
+  assert.ok(css.includes('--m3e-dialog-min-width: calc(100vw - 2rem)'));
+  assert.ok(css.includes('--m3e-dialog-max-width: calc(100vw - 2rem)'));
+});
+
+test('settings subpages remain dismissible by tapping the mobile modal backdrop', () => {
+  const settings = fs.readFileSync(new URL('../cmd/nas-photo/web/settings.js', import.meta.url), 'utf8');
+  const helper = settings.slice(settings.indexOf('function renderSettingsDialog('), settings.indexOf('function openSettingsDialog('));
+  assert.ok(helper.includes("dialog.tagName === 'M3E-DIALOG' && toolbarUsesModal()"));
+  assert.ok(helper.includes('dialog.disableClose = false'));
+});

@@ -127,7 +127,7 @@
 .top-toolbar {
   padding: .15rem;
   border-radius: 999px;
-  background: var(--nas-color-surface-container, #151d31);
+  background: transparent;
 }
 .toolbar-segment {
   display: flex;

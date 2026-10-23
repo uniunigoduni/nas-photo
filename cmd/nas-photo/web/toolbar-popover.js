@@ -1,6 +1,11 @@
 // Toolbar menus open on hover and close immediately outside the anchor,
 // panel, or their narrow safe triangle. Click toggles the visible menu.
 const TOOLBAR_GAP = 8;
+// Compact layouts use real modal dialogs instead of transient hover popovers.
+const MOBILE_TOOLBAR_QUERY = '(max-width: 767px)';
+function toolbarUsesModal() {
+  return matchMedia(MOBILE_TOOLBAR_QUERY).matches;
+}
 let toolbarPopup = null;
 let toolbarApex = null;
 let toolbarBindingsInstalled = false;
@@ -171,12 +176,20 @@ function openToolbarPopup(panel, anchor, focusFirst = false) {
 
 function openToolbarFromAnchor(anchor, focusFirst = false) {
   const opener = toolbarOpeners.get(anchor);
-  if (!opener || !anchor.isConnected || toolbarPopup?.anchor === anchor) return;
+  if (!opener || !anchor.isConnected) return;
+  if (toolbarUsesModal()) {
+    closeToolbarPopup();
+    // No anchor restores the original M3E modal, with backdrop dismissal
+    // and its own scroll area (not the transient popover's scroll handler).
+    opener(null, false);
+    return;
+  }
+  if (toolbarPopup?.anchor === anchor) return;
   opener(anchor, focusFirst);
 }
 
 function hoverToolbarAnchor(anchor, event) {
-  if (event.pointerType && event.pointerType !== 'mouse') return;
+  if (toolbarUsesModal() || (event.pointerType && event.pointerType !== 'mouse')) return;
   if (toolbarSuppressedAnchor === anchor) return;
   toolbarSuppressedAnchor = null;
   openToolbarFromAnchor(anchor);
@@ -251,7 +264,10 @@ function installToolbarPopupListeners() {
       anchor.focus({preventScroll: true});
     }
   }, true);
-  window.addEventListener('resize', queueToolbarPosition, {passive: true});
+  window.addEventListener('resize', () => {
+    if (toolbarUsesModal()) closeToolbarPopup();
+    else queueToolbarPosition();
+  }, {passive: true});
   window.visualViewport?.addEventListener('resize', queueToolbarPosition, {passive: true});
   window.visualViewport?.addEventListener('scroll', queueToolbarPosition, {passive: true});
   // Wheel gestures over a popup should scroll the underlying gallery, not a
@@ -287,6 +303,10 @@ function bindToolbarMenu(anchor, opener) {
     }
   });
   anchor.onclick = () => {
+    if (toolbarUsesModal()) {
+      openToolbarFromAnchor(anchor);
+      return;
+    }
     if (toolbarPopup?.anchor === anchor) {
       closeToolbarPopup();
       // The pointer is still over this segment; don't reopen until it leaves.

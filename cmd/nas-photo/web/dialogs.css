@@ -317,3 +317,13 @@ m3e-dialog.settings-dialog {
     gap: .65rem;
   }
 }
+
+/* On phones, toolbar actions use the original modal dialog surface.
+   Match minimum and maximum widths so navigating content cannot resize it. */
+@media (max-width: 767px) {
+  m3e-dialog.option-dialog,
+  m3e-dialog.option-dialog.settings-dialog {
+    --m3e-dialog-min-width: calc(100vw - 2rem);
+    --m3e-dialog-max-width: calc(100vw - 2rem);
+  }
+}

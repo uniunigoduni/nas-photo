@@ -1,5 +1,8 @@
 function renderSettingsDialog(dialog, title, body, actions, singleActions = false) {
   renderMaterialDialog(dialog, title, body, actions, {contentClass: 'settings-dialog-body', singleActions});
+  // Phone settings pages are modal, so a backdrop tap must always return
+  // to the gallery, including after switching to a nested settings page.
+  if (dialog.tagName === 'M3E-DIALOG' && toolbarUsesModal()) dialog.disableClose = false;
 }
 
 function openSettingsDialog(anchor = null, pinned = false) {
