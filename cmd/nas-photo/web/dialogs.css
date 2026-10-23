@@ -258,7 +258,8 @@ m3e-dialog.settings-dialog {
   flex-direction: column;
   gap: .85rem;
   box-sizing: border-box;
-  width: min(440px, calc(100vw - 20px));
+  width: max-content;
+  max-width: min(420px, calc(100vw - 20px));
   max-height: calc(100dvh - 20px);
   overflow: hidden;
   margin: 0;
@@ -289,9 +290,6 @@ m3e-dialog.settings-dialog {
 }
 .toolbar-popup[popover] .dialog-shell-actions {
   flex: 0 0 auto;
-}
-.toolbar-popup[popover].settings-dialog {
-  width: min(620px, calc(100vw - 20px));
 }
 .toolbar-popup[popover].settings-dialog .settings-dialog-body {
   min-height: 0;
