@@ -274,6 +274,11 @@ m3e-dialog.settings-dialog {
 .toolbar-popup[popover]:not(:popover-open) {
   display: none;
 }
+/* Keep the top-layer popup measurable but unpainted until geometry is final. */
+.toolbar-popup[popover][data-positioning] {
+  visibility: hidden;
+  pointer-events: none;
+}
 .toolbar-popup[popover]::backdrop {
   background: transparent;
 }
@@ -292,6 +297,9 @@ m3e-dialog.settings-dialog {
 }
 .toolbar-popup[popover].settings-dialog .settings-dialog-body {
   min-height: 0;
+  /* M3E button ink extends 4px below its 40px layout box. Reserve that
+     space in normal flow rather than creating a spurious overflow scrollbar. */
+  padding-block-end: 4px;
 }
 /* A vertical action list avoids stretching the scan popup to the sum of all labels. */
 .toolbar-popup[popover].action-dialog .option-choice-grid {

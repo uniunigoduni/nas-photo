@@ -93,6 +93,27 @@ test('scan uses a vertical intrinsic-width list and toolbar stays left of settin
   assert.match(shell, /\.top-actions\s*\{[^}]*margin-left:\s*auto/);
   assert.match(shell, /#settings\s*\{[^}]*grid-row:\s*2/);
 });
+test('settings layout reserves real button ink overflow instead of hiding scrollbar tracks', () => {
+  const css = fs.readFileSync(new URL('../cmd/nas-photo/web/dialogs.css', import.meta.url), 'utf8');
+  const settings = css.match(/\.toolbar-popup\[popover\]\.settings-dialog \.settings-dialog-body\s*\{([^}]*)\}/)?.[1] || '';
+  assert.match(settings, /padding-block-end:\s*4px/);
+  assert.doesNotMatch(settings, /overflow:\s*hidden|scrollbar-width:\s*none/);
+  const scrollable = css.match(/\.toolbar-popup\[popover\] \.dialog-shell-content\s*\{([^}]*)\}/)?.[1] || '';
+  assert.match(scrollable, /overflow:\s*auto/);
+});
+
+test('first opening and resized content are measured before being painted', () => {
+  const css = fs.readFileSync(new URL('../cmd/nas-photo/web/dialogs.css', import.meta.url), 'utf8');
+  const hidden = css.match(/\.toolbar-popup\[popover\]\[data-positioning\]\s*\{([^}]*)\}/)?.[1] || '';
+  assert.match(hidden, /visibility:\s*hidden/);
+  assert.doesNotMatch(hidden, /display:\s*none/);
+  assert.ok(source.indexOf("panel.setAttribute('data-positioning', '')") < source.indexOf('panel.showPopover()'));
+  assert.match(source, /const size = panel\.getBoundingClientRect\(\)/);
+  assert.match(source, /panel\.style\.maxHeight = 'none'/);
+  assert.match(source, /positionToolbarPopup\(panel, toolbarPopup\.anchor\);\s*panel\.removeAttribute\('data-positioning'\)/);
+  assert.match(source, /toolbarResizeObserver = new ResizeObserver\(queueToolbarPosition\)/);
+  assert.match(source, /toolbarMutationObserver = new MutationObserver\(queueToolbarPosition\)/);
+});
 test('toolbar controls remain available to mouse, touch and keyboard users', () => {
   assert.match(source, /anchor\.addEventListener\('pointerenter'/);
   assert.match(source, /anchor\.addEventListener\('keydown'/);

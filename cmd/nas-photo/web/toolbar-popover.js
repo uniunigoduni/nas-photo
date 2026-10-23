@@ -74,25 +74,37 @@ function positionToolbarPopup(panel, anchor) {
   if (!panel.isConnected || !anchor.isConnected) return;
   const viewport = toolbarViewportBounds();
   const margin = 10;
+  // Measure the natural content with no height constraint before choosing
+  // the side, available height, and final coordinates. The popup stays
+  // invisible during this layout pass.
   panel.style.maxWidth = Math.max(0, Math.min(420, viewport.width - margin * 2)) + 'px';
-  panel.style.maxHeight = Math.max(0, viewport.height - margin * 2) + 'px';
-  const rect = panel.getBoundingClientRect();
-  const box = anchor.getBoundingClientRect();
-  const geometry = toolbarPlacement(box, {
-    width: rect.width, height: Math.max(rect.height, panel.scrollHeight)
-  }, viewport, TOOLBAR_GAP, margin);
-  panel.style.maxHeight = Math.max(0, Math.min(geometry.maxHeight, viewport.height - margin * 2)) + 'px';
-  const positioned = toolbarPlacement(box, panel.getBoundingClientRect(), viewport, TOOLBAR_GAP, margin);
-  panel.style.left = positioned.left + 'px';
-  panel.style.top = positioned.top + 'px';
+  panel.style.maxHeight = 'none';
+  panel.style.left = '0px';
+  panel.style.top = '0px';
   panel.style.right = 'auto';
   panel.style.bottom = 'auto';
+  const size = panel.getBoundingClientRect();
+  const anchorRect = anchor.getBoundingClientRect();
+  const placement = toolbarPlacement(anchorRect, {
+    width: size.width,
+    height: Math.max(size.height, panel.scrollHeight)
+  }, viewport, TOOLBAR_GAP, margin);
+  panel.style.maxHeight = Math.max(0, Math.min(placement.maxHeight, viewport.height - margin * 2)) + 'px';
+  // Keep the measured width in the placement calculation. Overflow reduces
+  // the panel height but must not move the anchor-aligned horizontal edge.
+  panel.style.left = placement.left + 'px';
+  panel.style.top = placement.top + 'px';
 }
 function queueToolbarPosition() {
   if (toolbarPositionFrame || !toolbarPopup) return;
+  const panel = toolbarPopup.panel;
+  // A content/viewport size change cannot paint at the old coordinates.
+  panel.setAttribute('data-positioning', '');
   toolbarPositionFrame = requestAnimationFrame(() => {
     toolbarPositionFrame = 0;
-    if (toolbarPopup) positionToolbarPopup(toolbarPopup.panel, toolbarPopup.anchor);
+    if (toolbarPopup?.panel !== panel) return;
+    positionToolbarPopup(panel, toolbarPopup.anchor);
+    panel.removeAttribute('data-positioning');
   });
 }
 
@@ -132,13 +144,16 @@ function leaveToolbarSurface(source, toAnchor, event) {
 function openToolbarPopup(panel, anchor, focusFirst = false) {
   if (toolbarPopup?.panel === panel) return;
   closeToolbarPopup();
+  // A popover must be in the top layer to measure its real intrinsic size.
+  // Hide it only during measurement, never by suppressing scrollbars.
+  panel.setAttribute('data-positioning', '');
   document.body.append(panel);
   panel.id = 'toolbar-popup-' + (++toolbarPanelSequence);
   panel.showPopover();
   toolbarPopup = {panel, anchor};
   anchor.setAttribute('aria-expanded', 'true');
   anchor.setAttribute('aria-controls', panel.id);
-  positionToolbarPopup(panel, anchor);
+  queueToolbarPosition();
   toolbarResizeObserver = new ResizeObserver(queueToolbarPosition);
   toolbarResizeObserver.observe(panel);
   toolbarMutationObserver = new MutationObserver(queueToolbarPosition);
