@@ -5,6 +5,9 @@ let toolbarPopup = null;
 let toolbarApex = null;
 let toolbarBindingsInstalled = false;
 let toolbarPanelSequence = 0;
+let toolbarResizeObserver = null;
+let toolbarMutationObserver = null;
+let toolbarPositionFrame = 0;
 const toolbarOpeners = new WeakMap();
 
 function toolbarPointerLeavesToward(source, destination, event) {
@@ -39,23 +42,70 @@ function inToolbarTriangle(point) {
     point.x <= toolbarApex.x + (right - toolbarApex.x) * t + 5;
 }
 
+// Popovers live in the top layer. Measure the visible viewport and shift
+// only when the requested position collides with an edge.
+function toolbarViewportBounds() {
+  const viewport = window.visualViewport;
+  if (viewport) return {
+    left: viewport.offsetLeft, top: viewport.offsetTop,
+    right: viewport.offsetLeft + viewport.width,
+    bottom: viewport.offsetTop + viewport.height,
+    width: viewport.width, height: viewport.height
+  };
+  return {left: 0, top: 0, right: innerWidth, bottom: innerHeight,
+    width: innerWidth, height: innerHeight};
+}
+function toolbarClamp(value, lower, upper) {
+  return Math.min(Math.max(value, lower), Math.max(lower, upper));
+}
+function toolbarPlacement(anchor, panelSize, viewport, gap = TOOLBAR_GAP, margin = 10) {
+  const below = Math.max(0, viewport.bottom - margin - anchor.bottom - gap);
+  const above = Math.max(0, anchor.top - gap - viewport.top - margin);
+  const flipped = below < panelSize.height && above > below;
+  const available = flipped ? above : below;
+  const width = Math.min(panelSize.width, Math.max(0, viewport.width - margin * 2));
+  const height = Math.min(panelSize.height, Math.max(0, available));
+  const left = toolbarClamp(anchor.left, viewport.left + margin, viewport.right - margin - width);
+  const preferredTop = flipped ? anchor.top - gap - height : anchor.bottom + gap;
+  const top = toolbarClamp(preferredTop, viewport.top + margin, viewport.bottom - margin - height);
+  return {left, top, flipped, maxHeight: available};
+}
 function positionToolbarPopup(panel, anchor) {
   if (!panel.isConnected || !anchor.isConnected) return;
-  const box = anchor.getBoundingClientRect();
-  const width = panel.getBoundingClientRect().width;
+  const viewport = toolbarViewportBounds();
   const margin = 10;
-  const left = Math.max(margin, Math.min(box.left, innerWidth - width - margin));
-  const availableBelow = innerHeight - box.bottom - TOOLBAR_GAP - margin;
-  const availableAbove = box.top - TOOLBAR_GAP - margin;
-  const flip = availableBelow < 230 && availableAbove > availableBelow;
-  const height = Math.min(panel.scrollHeight, Math.max(120, flip ? availableAbove : availableBelow));
-  panel.style.left = left + 'px';
-  panel.style.top = (flip ? Math.max(margin, box.top - TOOLBAR_GAP - height) : box.bottom + TOOLBAR_GAP) + 'px';
-  panel.style.maxHeight = Math.max(120, flip ? availableAbove : availableBelow) + 'px';
+  panel.style.maxWidth = Math.max(0, Math.min(420, viewport.width - margin * 2)) + 'px';
+  panel.style.maxHeight = Math.max(0, viewport.height - margin * 2) + 'px';
+  const rect = panel.getBoundingClientRect();
+  const box = anchor.getBoundingClientRect();
+  const geometry = toolbarPlacement(box, {
+    width: rect.width, height: Math.max(rect.height, panel.scrollHeight)
+  }, viewport, TOOLBAR_GAP, margin);
+  panel.style.maxHeight = Math.max(0, Math.min(geometry.maxHeight, viewport.height - margin * 2)) + 'px';
+  const positioned = toolbarPlacement(box, panel.getBoundingClientRect(), viewport, TOOLBAR_GAP, margin);
+  panel.style.left = positioned.left + 'px';
+  panel.style.top = positioned.top + 'px';
+  panel.style.right = 'auto';
+  panel.style.bottom = 'auto';
+}
+function queueToolbarPosition() {
+  if (toolbarPositionFrame || !toolbarPopup) return;
+  toolbarPositionFrame = requestAnimationFrame(() => {
+    toolbarPositionFrame = 0;
+    if (toolbarPopup) positionToolbarPopup(toolbarPopup.panel, toolbarPopup.anchor);
+  });
 }
 
 function closeToolbarPopup(panel = toolbarPopup?.panel) {
   if (!panel) return;
+  if (toolbarPopup?.panel === panel) {
+    toolbarResizeObserver?.disconnect();
+    toolbarMutationObserver?.disconnect();
+    toolbarResizeObserver = null;
+    toolbarMutationObserver = null;
+    cancelAnimationFrame(toolbarPositionFrame);
+    toolbarPositionFrame = 0;
+  }
   if (toolbarPopup?.panel === panel) {
     toolbarPopup.anchor.setAttribute('aria-expanded', 'false');
     toolbarPopup.anchor.removeAttribute('aria-controls');
@@ -89,6 +139,10 @@ function openToolbarPopup(panel, anchor, focusFirst = false) {
   anchor.setAttribute('aria-expanded', 'true');
   anchor.setAttribute('aria-controls', panel.id);
   positionToolbarPopup(panel, anchor);
+  toolbarResizeObserver = new ResizeObserver(queueToolbarPosition);
+  toolbarResizeObserver.observe(panel);
+  toolbarMutationObserver = new MutationObserver(queueToolbarPosition);
+  toolbarMutationObserver.observe(panel, {subtree: true, childList: true, characterData: true});
   panel.addEventListener('pointerenter', () => { toolbarApex = null; });
   panel.addEventListener('pointerleave', event => leaveToolbarSurface(panel, true, event));
   if (focusFirst) {
@@ -148,11 +202,24 @@ function installToolbarPopupListeners() {
       anchor.focus({preventScroll: true});
     }
   }, true);
-  window.addEventListener('resize', () => {
-    if (toolbarPopup) positionToolbarPopup(toolbarPopup.panel, toolbarPopup.anchor);
-  }, {passive: true});
+  window.addEventListener('resize', queueToolbarPosition, {passive: true});
+  window.visualViewport?.addEventListener('resize', queueToolbarPosition, {passive: true});
+  window.visualViewport?.addEventListener('scroll', queueToolbarPosition, {passive: true});
+  // Wheel gestures over a popup should scroll the underlying gallery, not a
+  // transient menu. Dismiss and forward the wheel delta to the page.
+  document.addEventListener('wheel', event => {
+    if (!toolbarPopup) return;
+    const onPopup = toolbarPopup.panel.contains(event.target);
+    if (onPopup && event.cancelable) event.preventDefault();
+    closeToolbarPopup();
+    if (onPopup) {
+      const factor = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? innerHeight : 1;
+      window.scrollBy({left: event.deltaX * factor, top: event.deltaY * factor, behavior: 'instant'});
+    }
+  }, {capture: true, passive: false});
+  // Scrollbar dragging, keyboard scrolling and touch scrolling also dismiss.
   window.addEventListener('scroll', () => {
-    if (toolbarPopup) positionToolbarPopup(toolbarPopup.panel, toolbarPopup.anchor);
+    if (toolbarPopup) closeToolbarPopup();
   }, {passive: true});
 }
 

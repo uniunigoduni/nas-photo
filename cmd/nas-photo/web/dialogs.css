@@ -286,13 +286,22 @@ m3e-dialog.settings-dialog {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  overscroll-behavior: contain;
 }
 .toolbar-popup[popover] .dialog-shell-actions {
   flex: 0 0 auto;
 }
 .toolbar-popup[popover].settings-dialog .settings-dialog-body {
   min-height: 0;
+}
+/* A vertical action list avoids stretching the scan popup to the sum of all labels. */
+.toolbar-popup[popover].action-dialog .option-choice-grid {
+  display: grid;
+  grid-template-columns: minmax(0, max-content);
+  justify-content: start;
+}
+.toolbar-popup[popover].action-dialog .option-choice-grid > m3e-button {
+  width: max-content;
+  max-width: 100%;
 }
 @media (max-width: 520px) {
   .toolbar-popup[popover] {

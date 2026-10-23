@@ -7,7 +7,7 @@ const source = fs.readFileSync(new URL('../cmd/nas-photo/web/toolbar-popover.js'
 
 function fixture() {
   const context = vm.createContext({});
-  const api = vm.runInContext(source + '\n;({inToolbarTriangle,toolbarPointerLeavesToward,hoverToolbarAnchor,bindToolbarMenu})', context);
+  const api = vm.runInContext(source + '\n;({inToolbarTriangle,toolbarPointerLeavesToward,toolbarPlacement,hoverToolbarAnchor,bindToolbarMenu})', context);
   return {context, api};
 }
 
@@ -52,6 +52,46 @@ test('menu width follows its content with a viewport-safe cap', () => {
   assert.match(popupRule, /width:\s*max-content/);
   assert.match(popupRule, /max-width:\s*min\(420px,\s*calc\(100vw - 20px\)\)/);
   assert.doesNotMatch(css, /\.toolbar-popup\[popover\]\.settings-dialog\s*\{\s*width:/);
+});
+
+test('collision placement shifts, flips, and respects visual viewport offsets', () => {
+  const {api} = fixture();
+  const viewport = {left: 0, top: 0, right: 320, bottom: 480, width: 320, height: 480};
+  const rightEdge = api.toolbarPlacement({left: 290, right: 320, top: 20, bottom: 50},
+    {width: 210, height: 180}, viewport);
+  assert.equal(rightEdge.left, 100);
+  assert.equal(rightEdge.top, 58);
+  assert.equal(rightEdge.flipped, false);
+  const bottomEdge = api.toolbarPlacement({left: 100, right: 140, top: 420, bottom: 460},
+    {width: 190, height: 240}, viewport);
+  assert.equal(bottomEdge.flipped, true);
+  assert.equal(bottomEdge.top, 172);
+  assert.ok(bottomEdge.left + 190 <= viewport.right - 10);
+  const zoomedViewport = {left: 40, top: 55, right: 340, bottom: 455, width: 300, height: 400};
+  const shifted = api.toolbarPlacement({left: 330, right: 340, top: 100, bottom: 125},
+    {width: 260, height: 200}, zoomedViewport);
+  assert.equal(shifted.left, 70);
+  assert.ok(shifted.top >= 65 && shifted.top + 200 <= 445);
+});
+
+test('content size changes trigger repositioning and wheel scrolling dismisses the menu', () => {
+  assert.match(source, /new ResizeObserver\(queueToolbarPosition\)/);
+  assert.match(source, /new MutationObserver\(queueToolbarPosition\)/);
+  assert.match(source, /window\.visualViewport\?\.addEventListener\('resize'/);
+  assert.match(source, /document\.addEventListener\('wheel'/);
+  assert.match(source, /if \(onPopup && event\.cancelable\) event\.preventDefault\(\)/);
+  assert.match(source, /window\.scrollBy\(/);
+  assert.match(source, /if \(toolbarPopup\) closeToolbarPopup\(\)/);
+});
+
+test('scan uses a vertical intrinsic-width list and toolbar stays left of settings', () => {
+  const css = fs.readFileSync(new URL('../cmd/nas-photo/web/dialogs.css', import.meta.url), 'utf8');
+  const shell = fs.readFileSync(new URL('../cmd/nas-photo/web/shell.css', import.meta.url), 'utf8');
+  assert.match(css, /\.toolbar-popup\[popover\]\.action-dialog \.option-choice-grid\s*\{[^}]*display:\s*grid/);
+  assert.match(css, /grid-template-columns:\s*minmax\(0, max-content\)/);
+  assert.match(shell, /\.top-actions\s*\{[^}]*justify-content:\s*flex-end/);
+  assert.match(shell, /\.top-actions\s*\{[^}]*margin-left:\s*auto/);
+  assert.match(shell, /#settings\s*\{[^}]*grid-row:\s*2/);
 });
 test('toolbar controls remain available to mouse, touch and keyboard users', () => {
   assert.match(source, /anchor\.addEventListener\('pointerenter'/);
