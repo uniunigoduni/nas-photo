@@ -36,8 +36,9 @@ jobs:
       - name: Test web gallery and media transitions
         run: |
           node --check cmd/nas-photo/web/gallery.js
+          node --check cmd/nas-photo/web/upload.js
           node --check cmd/nas-photo/web/viewer.js
-          node --test scripts/test-layout.mjs scripts/test-viewer-transition.mjs
+          node --test scripts/test-layout.mjs scripts/test-viewer-transition.mjs scripts/test-media-drag.mjs
 
       - name: Build two release executables
         run: |

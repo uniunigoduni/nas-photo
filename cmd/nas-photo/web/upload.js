@@ -5,6 +5,8 @@
   ]);
   const UPLOAD_PHASE_WEIGHT = 0.5;
   const COMMIT_POLL_INTERVAL_MS = 200;
+  const INTERNAL_DRAG_TYPE = 'application/x-nas-photo-internal';
+  let internalDragActive = false;
 
   const copy = {
     en: {
@@ -554,7 +556,45 @@
     return [...(event.dataTransfer?.types || [])].includes('Files');
   }
 
+  // Mark every drag originating here, including drags between split panes or tabs.
+  // The marker is visible in dragover even while the payload itself is protected.
+  document.addEventListener('dragstart', event => {
+    const transfer = event.dataTransfer;
+    if (!transfer) return;
+    const tile = event.target.closest?.('.gallery .tile');
+    if (tile) {
+      const item = state.items.find(item => item.id === tile.dataset.id);
+      if (!item) {
+        event.preventDefault();
+        return;
+      }
+      const contentURL = new URL(`/api/media/${encodeURIComponent(item.id)}/content`, location.href);
+      const downloadURL = new URL(contentURL);
+      downloadURL.searchParams.set('download', '1');
+      // Do not export the browser's default thumbnail payload.
+      transfer.clearData();
+      transfer.setData('DownloadURL', `application/octet-stream:${item.name}:${downloadURL.href}`);
+      transfer.setData('text/uri-list', contentURL.href);
+      transfer.setData('text/plain', contentURL.href);
+      if (item.kind !== 'video') {
+        transfer.setData('text/html', `<img src="${escapeHTML(contentURL.href)}" alt="${escapeHTML(item.name)}">`);
+      }
+      transfer.effectAllowed = 'copy';
+    }
+    transfer.setData(INTERNAL_DRAG_TYPE, location.origin);
+    internalDragActive = true;
+  });
+
+  function blockInternalDrop(event) {
+    if (!internalDragActive && ![...(event.dataTransfer?.types || [])].includes(INTERNAL_DRAG_TYPE)) return false;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'none';
+    resetDragUI();
+    return true;
+  }
+
   document.addEventListener('dragenter', event => {
+    if (blockInternalDrop(event)) return;
     if (!hasFiles(event)) return;
     event.preventDefault();
     dragDepth++;
@@ -562,6 +602,7 @@
   });
 
   document.addEventListener('dragover', event => {
+    if (blockInternalDrop(event)) return;
     if (!hasFiles(event)) return;
     event.preventDefault();
     if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
@@ -579,10 +620,17 @@
   });
 
   document.addEventListener('drop', event => {
+    if (blockInternalDrop(event)) {
+      internalDragActive = false;
+      return;
+    }
     if (!hasFiles(event)) return;
     event.preventDefault();
     handleDrop(event);
   });
-  document.addEventListener('dragend', resetDragUI);
+  document.addEventListener('dragend', () => {
+    internalDragActive = false;
+    resetDragUI();
+  });
   window.addEventListener('blur', resetDragUI);
 })();

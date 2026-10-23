@@ -65,10 +65,11 @@
   padding: 0;
   overflow: hidden;
   border: 0;
-  border-radius: var(--nas-shape-large, 16px);
+  border-radius: var(--nas-shape-extra-large, 28px);
   background: var(--nas-color-surface-container-high, #182238);
   color: var(--nas-color-on-surface, #fff);
-  box-shadow: var(--nas-elevation-level0, none);
+  transform: scale(1);
+  box-shadow: var(--nas-elevation-level1, 0 1px 3px #0005);
   transition: transform var(--nas-gallery-tile-effect-motion),
     border-radius var(--nas-gallery-tile-effect-motion),
     box-shadow var(--nas-gallery-tile-effect-motion);
@@ -150,7 +151,7 @@
 @media (hover: hover) {
   .tile:hover {
     transform: scale(1.012);
-    border-radius: var(--nas-shape-extra-large, 28px);
-    box-shadow: var(--nas-elevation-level1, 0 1px 3px #0005);
+    border-radius: var(--nas-shape-large, 16px);
+    box-shadow: var(--nas-elevation-level0, none);
   }
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -57,6 +58,32 @@ func libraryRequest(a *app, method, target string) *httptest.ResponseRecorder {
 		a.mediaByID(response, request)
 	}
 	return response
+}
+
+func TestOriginalMediaDragDownload(t *testing.T) {
+	root := t.TempDir()
+	const name = "写真.jpg"
+	const content = "original full-size image bytes"
+	writeLibraryFile(t, root, name, content)
+	a := newLibraryTestApp(t, root)
+	a.rescan(t.Context())
+	items, _ := libraryPage(t, a, "")
+	if len(items) != 1 {
+		t.Fatalf("expected one media item, got %d", len(items))
+	}
+	url := "/api/media/" + items[0].ID + "/content"
+	response := libraryRequest(a, http.MethodGet, url+"?download=1")
+	if response.Code != http.StatusOK || response.Body.String() != content {
+		t.Fatalf("download did not return original bytes: %d %q", response.Code, response.Body.String())
+	}
+	disposition, params, err := mime.ParseMediaType(response.Header().Get("Content-Disposition"))
+	if err != nil || disposition != "attachment" || params["filename"] != name {
+		t.Fatalf("original filename not preserved: %q (%v)", response.Header().Get("Content-Disposition"), err)
+	}
+	inline := libraryRequest(a, http.MethodGet, url)
+	if inline.Code != http.StatusOK || inline.Header().Get("Content-Disposition") != "" {
+		t.Fatal("normal viewer content must remain inline")
+	}
 }
 
 func libraryPage(t *testing.T, a *app, query string) ([]Item, int) {

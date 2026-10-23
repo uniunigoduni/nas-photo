@@ -275,9 +275,9 @@ function galleryAspectRatio(item) {
 
 function tileHTML(item) {
   const thumb = mediaThumbnailURL(item);
-  return `<button class="tile" data-id="${item.id}" data-kind="${item.kind}" data-aspect-ratio="${galleryAspectRatio(item)}" data-content-version="${escapeHTML(mediaContentVersion(item))}" data-thumbnail-source="${escapeHTML(thumb)}" aria-label="${escapeHTML(item.name)}" data-tooltip="${t('mediaTip')}">
+  return `<button class="tile" draggable="true" data-id="${item.id}" data-kind="${item.kind}" data-aspect-ratio="${galleryAspectRatio(item)}" data-content-version="${escapeHTML(mediaContentVersion(item))}" data-thumbnail-source="${escapeHTML(thumb)}" aria-label="${escapeHTML(item.name)}" data-tooltip="${t('mediaTip')}">
     <span class="thumb-fallback"></span>
-    <img src="${escapeHTML(thumb)}" loading="lazy" decoding="async" alt="">
+    <img src="${escapeHTML(thumb)}" draggable="false" loading="lazy" decoding="async" alt="">
     ${item.kind === 'video' ? '<span class="play-mark" aria-hidden="true"><m3e-icon name="play_arrow"></m3e-icon></span>' : ''}
   </button>`;
 }
@@ -287,6 +287,7 @@ function replaceGalleryThumbnail(tile, source) {
   tile.dataset.thumbnailSource = source;
   const current = $('img', tile);
   const image = new Image();
+  image.draggable = false;
   image.alt = '';
   image.decoding = 'async';
   image.loading = 'lazy';

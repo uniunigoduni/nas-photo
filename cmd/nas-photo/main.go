@@ -1076,6 +1076,9 @@ func (a *app) mediaByID(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", typ)
 		w.Header().Set("Cache-Control", "private, no-cache")
+		if r.URL.Query().Get("download") == "1" {
+			w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": it.Name}))
+		}
 		http.ServeContent(w, r, it.Name, info.ModTime(), f)
 		return
 	}
