@@ -1,12 +1,17 @@
 function closeMaterialDialog(dialog) {
   if (!dialog) return;
+  if (dialog.classList.contains('toolbar-popup')) return closeToolbarPopup(dialog);
   if (dialog.open) dialog.open = false;
   else dialog.remove();
 }
 
-function createMaterialDialogShell(className = 'option-dialog', title = '') {
-  const dialog = document.createElement('m3e-dialog');
-  dialog.className = className;
+function createMaterialDialogShell(className = 'option-dialog', title = '', anchor = null) {
+  const dialog = document.createElement(anchor ? 'section' : 'm3e-dialog');
+  dialog.className = className + (anchor ? ' toolbar-popup' : '');
+  if (anchor) {
+    dialog.setAttribute('popover', 'manual');
+    dialog.setAttribute('role', 'dialog');
+  }
   dialog.innerHTML = `<span slot="header" class="dialog-shell-header"></span>
     <div class="dialog-shell-content"></div>
     <div slot="actions" class="dialog-actions dialog-shell-actions"></div>`;
@@ -27,8 +32,9 @@ function renderMaterialDialog(dialog, title, body, actions, options = {}) {
   actionBar.innerHTML = actions;
 }
 
-function openMaterialDialog(dialog) {
+function openMaterialDialog(dialog, anchor = null, pinned = false) {
   if (!dialog || dialog.isConnected) return;
+  if (anchor) return openToolbarPopup(dialog, anchor, pinned);
   dialog.addEventListener('closed', () => dialog.remove(), {once: true});
   document.body.append(dialog);
   // The dialog's scroll container is inside its shadow root.
@@ -70,8 +76,8 @@ function openMaterialDialog(dialog) {
   dialog.open = true;
 }
 
-function showSortDialog() {
-  const overlay = createMaterialDialogShell('option-dialog sort-dialog', t('sort'));
+function showSortDialog(anchor = null, pinned = false) {
+  const overlay = createMaterialDialogShell('option-dialog sort-dialog', t('sort'), anchor);
   const draft = {sort: state.sort, order: state.order, subSort: state.subSort, randomSeed: state.randomSeed};
   const isDateSort = () => ['captured', 'created', 'modified'].includes(draft.sort);
   const choice = (label, group, value, selected, disabled = false) =>
@@ -132,11 +138,11 @@ function showSortDialog() {
     closeMaterialDialog(overlay);
     await refreshGalleryItems();
   };
-  openMaterialDialog(overlay);
+  openMaterialDialog(overlay, anchor, pinned);
 }
 
-function optionDialog(title, sections, initialValues, onSave) {
-  const overlay = createMaterialDialogShell('option-dialog', title);
+function optionDialog(title, sections, initialValues, onSave, anchor = null, pinned = false) {
+  const overlay = createMaterialDialogShell('option-dialog', title, anchor);
   const draft = {...initialValues};
   const choice = (label, group, value, selected, disabled = false) =>
     `<m3e-button variant="tonal" size="small" class="option" toggle ${selected ? 'selected' : ''}
@@ -163,11 +169,11 @@ function optionDialog(title, sections, initialValues, onSave) {
     closeMaterialDialog(overlay);
     await onSave(values);
   };
-  openMaterialDialog(overlay);
+  openMaterialDialog(overlay, anchor, pinned);
 }
 
-function actionDialog(title, sections, onSelect) {
-  const overlay = createMaterialDialogShell('option-dialog action-dialog', title);
+function actionDialog(title, sections, onSelect, anchor = null, pinned = false) {
+  const overlay = createMaterialDialogShell('option-dialog action-dialog', title, anchor);
   renderMaterialDialog(overlay, title, `<div class="option-dialog-sections">${sections.map(([label, options]) => `<div class="option-section">
     <div class="option-legend">${escapeHTML(label)}</div>
     <div class="option-choice-grid" role="group" aria-label="${escapeHTML(label)}">
@@ -181,5 +187,5 @@ function actionDialog(title, sections, onSelect) {
     await onSelect(value);
   });
   $('#option-close', overlay).onclick = () => closeMaterialDialog(overlay);
-  openMaterialDialog(overlay);
+  openMaterialDialog(overlay, anchor, pinned);
 }

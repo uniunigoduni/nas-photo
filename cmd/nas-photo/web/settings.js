@@ -2,10 +2,10 @@ function renderSettingsDialog(dialog, title, body, actions, singleActions = fals
   renderMaterialDialog(dialog, title, body, actions, {contentClass: 'settings-dialog-body', singleActions});
 }
 
-function openSettingsDialog() {
-  const dialog = createMaterialDialogShell('option-dialog settings-dialog', t('settings'));
+function openSettingsDialog(anchor = null, pinned = false) {
+  const dialog = createMaterialDialogShell('option-dialog settings-dialog', t('settings'), anchor);
   renderSettingsHome(dialog);
-  openMaterialDialog(dialog);
+  openMaterialDialog(dialog, anchor, pinned);
 }
 
 function renderSettingsHome(dialog) {

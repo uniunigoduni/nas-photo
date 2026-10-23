@@ -530,8 +530,8 @@ function connectGalleryShell() {
     const tile = event.target.closest('.tile');
     if (tile && gallery.contains(tile)) openViewerFromTile(tile);
   };
-  $('#sort-menu').onclick = showSortDialog;
-  $('#view-menu').onclick = () => optionDialog(t('view'), [
+  bindToolbarMenu($('#sort-menu'), (anchor, pinned) => showSortDialog(anchor, pinned));
+  bindToolbarMenu($('#view-menu'), (anchor, pinned) => optionDialog(t('view'), [
     [t('display'), 'layout', [[t('square'), 'square'], [t('river'), 'river']]],
     [t('size'), 'size', [[t('small'), 'small'], [t('medium'), 'medium'], [t('large'), 'large']]]
   ], {layout: state.layout, size: state.size}, draft => {
@@ -539,8 +539,8 @@ function connectGalleryShell() {
     state.size = draft.size;
     savePreferences();
     updateGalleryItems();
-  });
-  $('#filter-menu').onclick = () => optionDialog(t('filter'), [
+  }, anchor, pinned));
+  bindToolbarMenu($('#filter-menu'), (anchor, pinned) => optionDialog(t('filter'), [
     [t('mediaType'), 'filter', [[t('all'), ''], [t('images'), 'image'], [t('videos'), 'video']]],
     [t('filterCondition'), 'filterCondition', [[t('noFilterCondition'), ''], [t('duplicates'), 'duplicates']]]
   ], {filter: state.filter, filterCondition: state.filterCondition}, draft => {
@@ -548,8 +548,8 @@ function connectGalleryShell() {
     state.filterCondition = draft.filterCondition;
     savePreferences();
     return refreshGalleryItems();
-  });
-  $('#scan-menu').onclick = () => actionDialog(t('rescan'), [
+  }, anchor, pinned));
+  bindToolbarMenu($('#scan-menu'), (anchor, pinned) => actionDialog(t('rescan'), [
     [t('index'), [[t('rescanNow'), 'scan']]],
     [t('thumbnails'), [
       [t('generateThumbnails'), 'thumbnails'],
@@ -580,8 +580,8 @@ function connectGalleryShell() {
       status.hidden = false;
       status.textContent = reason.message;
     }
-  });
-  $('#settings').onclick = openSettingsDialog;
+  }, anchor, pinned));
+  bindToolbarMenu($('#settings'), (anchor, pinned) => openSettingsDialog(anchor, pinned));
 }
 
 async function monitorScan(token, observedRunning = false, observedThumbnailing = false, observedCleanup = false) {

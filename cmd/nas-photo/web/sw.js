@@ -1,5 +1,5 @@
-const CACHE='nas-photo-shell-v46';
-const SHELL=['/','/index.html','/theme.css','/base.css','/scrollbars.css','/shell.css','/gallery.css','/dialogs.css','/viewer.css','/upload.css','/m3e.bundle.js','/layout.js','/core.js','/shell.js','/gallery.js','/dialogs.js','/viewer.js','/viewer-state.js','/viewer-zoom.js','/viewer-gestures.js','/settings.js','/upload.js','/runtime.js','/manifest.webmanifest','/icon.svg'];
+const CACHE='nas-photo-shell-v47';
+const SHELL=['/','/index.html','/theme.css','/base.css','/scrollbars.css','/shell.css','/gallery.css','/dialogs.css','/viewer.css','/upload.css','/m3e.bundle.js','/layout.js','/core.js','/shell.js','/gallery.js','/dialogs.js','/toolbar-popover.js','/viewer.js','/viewer-state.js','/viewer-zoom.js','/viewer-gestures.js','/settings.js','/upload.js','/runtime.js','/manifest.webmanifest','/icon.svg'];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(SHELL))));
 self.addEventListener('activate',event=>event.waitUntil(
   caches.keys().then(keys=>Promise.all(keys.filter(key=>key!==CACHE).map(key=>caches.delete(key))))

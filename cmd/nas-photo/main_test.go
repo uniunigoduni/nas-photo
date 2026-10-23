@@ -50,7 +50,7 @@ func readWebAssetSet(t *testing.T, names ...string) string {
 }
 
 func webJavaScript(t *testing.T) string {
-	return readWebAssetSet(t, "web/core.js", "web/shell.js", "web/gallery.js", "web/dialogs.js", "web/viewer.js", "web/viewer-zoom.js", "web/viewer-gestures.js", "web/settings.js", "web/runtime.js")
+	return readWebAssetSet(t, "web/core.js", "web/shell.js", "web/gallery.js", "web/dialogs.js", "web/toolbar-popover.js", "web/viewer.js", "web/viewer-zoom.js", "web/viewer-gestures.js", "web/settings.js", "web/runtime.js")
 }
 
 func webStyles(t *testing.T) string {
@@ -151,7 +151,7 @@ func TestSortMenuSupportsSameDayNameSubSort(t *testing.T) {
 func TestSortDialogStagesChangesUntilApply(t *testing.T) {
 	source := webJavaScript(t)
 	for _, feature := range []string{
-		"function showSortDialog()",
+		"function showSortDialog(anchor = null, pinned = false)",
 		"sort: state.sort",
 		"toggle ${selected ? 'selected' : ''}",
 		"class=\"sort-choice-grid sort-basis-grid\"",
@@ -179,7 +179,7 @@ func TestSortDialogStagesChangesUntilApply(t *testing.T) {
 func TestTopOptionDialogsStageChangesUntilSave(t *testing.T) {
 	source := webJavaScript(t)
 	for _, feature := range []string{
-		"function optionDialog(title, sections, initialValues, onSave)",
+		"function optionDialog(title, sections, initialValues, onSave, anchor = null, pinned = false)",
 		"const draft = {...initialValues}",
 		"draft[button.dataset.group] = button.dataset.value",
 		"id=\"option-close\"",
@@ -197,8 +197,8 @@ func TestTopOptionDialogsStageChangesUntilSave(t *testing.T) {
 func TestScanDialogRunsActionsImmediately(t *testing.T) {
 	source := webJavaScript(t)
 	for _, feature := range []string{
-		"$('#scan-menu').onclick = () => actionDialog(t('rescan')",
-		"function actionDialog(title, sections, onSelect)",
+		"bindToolbarMenu($('#scan-menu'), (anchor, pinned) => actionDialog(t('rescan')",
+		"function actionDialog(title, sections, onSelect, anchor = null, pinned = false)",
 		"closeMaterialDialog(overlay);",
 		"await onSelect(value);",
 	} {
@@ -833,10 +833,10 @@ func TestDialogLifecycleSeparatesOpenFromRender(t *testing.T) {
 	for _, feature := range []string{
 		"function createMaterialDialogShell(",
 		"function renderMaterialDialog(",
-		"function openMaterialDialog(dialog)",
-		"function openSettingsDialog()",
+		"function openMaterialDialog(dialog, anchor = null, pinned = false)",
+		"function openSettingsDialog(anchor = null, pinned = false)",
 		"function renderSettingsHome(dialog)",
-		"$('#settings').onclick = openSettingsDialog;",
+		"bindToolbarMenu($('#settings'), (anchor, pinned) => openSettingsDialog(anchor, pinned));",
 	} {
 		if !strings.Contains(source, feature) {
 			t.Fatalf("dialog lifecycle is missing %q", feature)
@@ -873,8 +873,8 @@ func TestDialogInternalNavigationKeepsStableShell(t *testing.T) {
 func TestSettingsStayInsideMaterialDialog(t *testing.T) {
 	source := webJavaScript(t)
 	for _, feature := range []string{
-		"function openSettingsDialog()",
-		"$('#settings').onclick = openSettingsDialog;",
+		"function openSettingsDialog(anchor = null, pinned = false)",
+		"bindToolbarMenu($('#settings'), (anchor, pinned) => openSettingsDialog(anchor, pinned));",
 		"createMaterialDialogShell('option-dialog settings-dialog'",
 		"function renderSettingsDialog(dialog, title, body, actions, singleActions = false)",
 		"renderShortcutSettings(dialog)",

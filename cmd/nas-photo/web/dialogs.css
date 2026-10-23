@@ -247,3 +247,58 @@ m3e-dialog.settings-dialog {
 .settings-root-list > #settings-add-root {
   min-height: 48px;
 }
+
+
+/* Anchored, non-modal toolbar menus. Keep dialog colors/sections, but no
+   fullscreen scrim or transform animation (software compositing friendly). */
+.toolbar-popup[popover] {
+  position: fixed;
+  inset: auto;
+  display: flex;
+  flex-direction: column;
+  gap: .85rem;
+  box-sizing: border-box;
+  width: min(440px, calc(100vw - 20px));
+  max-height: calc(100dvh - 20px);
+  overflow: hidden;
+  margin: 0;
+  padding: 1.1rem;
+  border: 1px solid var(--nas-color-outline-variant, #48546a);
+  border-radius: var(--nas-shape-extra-large, 28px);
+  background: var(--nas-color-surface-container-high, #151d31);
+  color: var(--nas-color-on-surface, #f8fafc);
+  box-shadow: var(--nas-elevation-level3, 0 8px 24px #0006);
+  opacity: 1;
+}
+.toolbar-popup[popover]:not(:popover-open) {
+  display: none;
+}
+.toolbar-popup[popover]::backdrop {
+  background: transparent;
+}
+.toolbar-popup[popover] .dialog-shell-header {
+  flex: 0 0 auto;
+  display: block;
+  font: var(--nas-type-title-medium, 600 1rem/1.45 system-ui);
+}
+.toolbar-popup[popover] .dialog-shell-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.toolbar-popup[popover] .dialog-shell-actions {
+  flex: 0 0 auto;
+}
+.toolbar-popup[popover].settings-dialog {
+  width: min(620px, calc(100vw - 20px));
+}
+.toolbar-popup[popover].settings-dialog .settings-dialog-body {
+  min-height: 0;
+}
+@media (max-width: 520px) {
+  .toolbar-popup[popover] {
+    padding: .8rem;
+    gap: .65rem;
+  }
+}

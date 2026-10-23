@@ -19,6 +19,7 @@ function fixture() {
   };
   const dialog = {
     isConnected: false,
+    classList: {contains() {return false;}},
     shadowRoot: {append(node) { events.push('shadow.append:' + node.tag); }},
     addEventListener(type, listener) {
       events.push('listener:' + type);
