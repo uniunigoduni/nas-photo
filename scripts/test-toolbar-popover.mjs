@@ -174,3 +174,15 @@ test('settings subpages remain dismissible by tapping the mobile modal backdrop'
   assert.ok(helper.includes("dialog.tagName === 'M3E-DIALOG' && toolbarUsesModal()"));
   assert.ok(helper.includes('dialog.disableClose = false'));
 });
+
+test('mobile toolbar keeps labels and stacks labeled buttons without overflow', () => {
+  const shell = fs.readFileSync(new URL('../cmd/nas-photo/web/shell.css', import.meta.url), 'utf8');
+  const gallery = fs.readFileSync(new URL('../cmd/nas-photo/web/gallery.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(shell, /\.toolbar-label\s*\{\s*display:\s*none/);
+  assert.match(shell, /@media \(max-width: 520px\)/);
+  assert.match(shell, /grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)\s+auto/);
+  assert.match(shell, /\.toolbar-segment-settings\s*\{[^}]*grid-row:\s*1\s*\/\s*span\s*2/);
+  assert.match(shell, /\.top-toolbar \.toolbar-segment:not\(\.toolbar-segment-settings\) m3e-button\s*\{[^}]*width:\s*100%/);
+  assert.equal((gallery.match(/class="toolbar-label"/g) || []).length, 4);
+  assert.match(gallery, /<strong class="top-title">NAS-PHOTO<\/strong>/);
+});

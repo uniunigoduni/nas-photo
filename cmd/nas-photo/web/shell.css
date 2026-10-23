@@ -173,12 +173,32 @@ m3e-linear-progress-indicator.progress {
   .top-title { grid-column: 1; grid-row: 1; align-self: center; }
   .top-actions { grid-column: 1; grid-row: 2; justify-self: end; }
 }
-@media (max-width: 480px) {
-  .toolbar-label { display: none; }
-  .toolbar-segment { padding-inline: .16rem; }
-  .top-toolbar .toolbar-segment m3e-button {
-    width: 40px;
-    min-width: 40px;
-    max-width: 40px;
+/* On phones retain the icon AND label. Only rearrange the same buttons:
+   two labeled buttons per row, with settings alongside both rows. */
+@media (max-width: 520px) {
+  .top.top-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+    grid-template-rows: repeat(2, auto);
+    width: 100%;
+    max-width: 100%;
+    margin-left: 0;
+    justify-self: stretch;
+    align-items: stretch;
+  }
+  .toolbar-segment {
+    min-width: 0;
+    padding: .14rem .2rem;
+  }
+  .top-toolbar .toolbar-segment:not(.toolbar-segment-settings) m3e-button {
+    flex: 1 1 auto;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .toolbar-segment-settings {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+    align-self: stretch;
   }
 }
