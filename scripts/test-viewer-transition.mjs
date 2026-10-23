@@ -180,3 +180,11 @@ test('CSS configures only the thumbnail morph, no full-screen snapshots',()=>{
   assert.doesNotMatch(css,/::view-transition-/);
   assert.doesNotMatch(css,/view-transition-name/);
 });
+
+test('zoomable media does not force a compositing layer', () => {
+  const css = fs.readFileSync(new URL('../cmd/nas-photo/web/viewer.css', import.meta.url), 'utf8');
+  const zoomRule = css.match(/\.zoomable\s*\{([^}]*)\}/);
+  assert.ok(zoomRule, 'zoomable styles exist');
+  assert.doesNotMatch(zoomRule[1], /will-change\s*:/);
+  assert.match(css, /\.swipe-track\s*\{[\s\S]*?will-change:\s*transform/);
+});

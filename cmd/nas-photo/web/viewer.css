@@ -170,7 +170,6 @@ body.viewer-open {
 .zoomable {
   cursor: zoom-in;
   user-select: none;
-  will-change: transform;
 }
 
 .zoomable.is-zoomed {

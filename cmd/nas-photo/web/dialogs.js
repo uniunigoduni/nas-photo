@@ -36,6 +36,37 @@ function openMaterialDialog(dialog) {
   scrollbarStyles.rel = 'stylesheet';
   scrollbarStyles.href = '/scrollbars.css';
   dialog.shadowRoot?.append(scrollbarStyles);
+
+  // M3E animates the entire modal backdrop by default. That causes repeated
+  // fullscreen software rasterization with GPU compositing disabled.
+  // Keep the scrim static and fade only the dialog surface on entry.
+  const motionStyles = document.createElement('style');
+  motionStyles.textContent = `
+    .base, .base[open], .base:not([open]) {
+      transform: none !important;
+    }
+    .base[open] {
+      transition: opacity 120ms ease-out,
+        overlay 120ms allow-discrete,
+        visibility 120ms allow-discrete !important;
+    }
+    .base:not([open]) {
+      transition: none !important;
+    }
+    .base::backdrop, .base[open]::backdrop, .base:not([open])::backdrop {
+      background-color: color-mix(in srgb,
+        var(--m3e-dialog-scrim-color, #000) var(--m3e-dialog-scrim-opacity, 32%),
+        transparent) !important;
+      transition: none !important;
+    }
+    @starting-style {
+      .base[open] {
+        opacity: 0;
+        transform: none !important;
+      }
+    }
+  `;
+  dialog.shadowRoot?.append(motionStyles);
   dialog.open = true;
 }
 

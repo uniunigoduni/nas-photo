@@ -4,7 +4,8 @@
   "scripts": {
     "build:web": "node scripts/build-m3e.mjs",
     "test:layout": "node --test scripts/test-layout.mjs",
-    "test:viewer-transition": "node --test scripts/test-viewer-transition.mjs"
+    "test:viewer-transition": "node --test scripts/test-viewer-transition.mjs",
+    "test:dialog-transition": "node --test scripts/test-dialog-transition.mjs"
   },
   "dependencies": {
     "@m3e/icons": "1.0.14",
