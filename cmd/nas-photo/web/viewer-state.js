@@ -62,13 +62,14 @@ async function restoreViewState(snapshot) {
   while (snapshot.media && !findItem(snapshot.media) && state.nextOffset >= 0) {
     if (!await loadNextPage()) break;
   }
+  const scrollY = Math.max(0, Number(snapshot.galleryScrollY) || 0);
   if (!snapshot.media || !findItem(snapshot.media)) {
+    state.viewerScrollY = scrollY;
     leaveViewer();
-    requestAnimationFrame(() => window.scrollTo(0, Math.max(0, Number(snapshot.galleryScrollY) || 0)));
     return;
   }
   openViewer(snapshot.media);
-  state.viewerScrollY = Math.max(0, Number(snapshot.galleryScrollY) || 0);
+  state.viewerScrollY = scrollY;
   restoreViewerZoom(snapshot);
   restoreViewerVideo(snapshot);
 }

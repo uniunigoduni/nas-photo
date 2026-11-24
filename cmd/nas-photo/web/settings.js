@@ -56,6 +56,7 @@ async function renderShortcutSettings(dialog) {
     button.querySelector('kbd').textContent = t('pressKey');
     const capture = event => {
       event.preventDefault();
+      event.stopImmediatePropagation();
       shortcuts[button.dataset.shortcut] = event.code;
       button.querySelector('kbd').textContent = event.code;
       document.removeEventListener('keydown', capture, true);

@@ -201,6 +201,7 @@ function installRetainedViewerPreview(root, preview) {
 }
 
 function openViewer(id, paneIndex = 0, swipeOffset = 0, swipeVelocity = 0, retainedPreview = null) {
+  if (typeof cancelGalleryScroll === 'function') cancelGalleryScroll();
   hideTooltip();
   state.viewerItems[paneIndex] = findItem(id) || null;
   state.viewer[paneIndex] = id;
@@ -260,7 +261,8 @@ function toggleSplit() {
     void collapseSplit();
     return;
   }
-  if (!state.viewer[0] || innerWidth < 768) return;
+  if ((!state.viewer[0] && !$('#gallery')) || innerWidth < 768) return;
+  if (typeof closeToolbarPopup === 'function') closeToolbarPopup();
   state.splitViewStates = {
     primary: captureViewState({preservePlaybackPosition:true}),
     secondary: captureViewState()
@@ -320,7 +322,10 @@ function leaveViewer() {
   $('.viewer-layer', app)?.remove();
   document.body.classList.remove('viewer-open');
   state.viewerTransitionSourceId = null;
-  requestAnimationFrame(() => window.scrollTo(0, scrollY));
+  requestAnimationFrame(() => {
+    window.scrollTo(0, scrollY);
+    scheduleRiverWindow();
+  });
 }
 
 const mediaLibraryChannel = typeof BroadcastChannel === 'function'

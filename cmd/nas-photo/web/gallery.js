@@ -16,6 +16,7 @@ async function showGallery() {
   state.galleryRenderFrame = 0;
   state.galleryRiverGeometry = null;
   state.galleryRiverRange = null;
+  cancelGalleryScroll();
   state.galleryQuery = queryString();
   document.body.classList.remove('viewer-open');
   state.items = [];
@@ -516,8 +517,125 @@ function renderVisibleRiverRows(force = false) {
   bindGalleryThumbnails(gallery);
 }
 
+const GALLERY_SCROLL_SPEED_PX_PER_SEC = 1400;
+
+const galleryScroll = {
+  frame: 0,
+  direction: 0,
+  positionY: null,
+  lastAppliedY: null,
+  lastTime: 0,
+  loadingMore: false
+};
+
+function cancelGalleryScroll() {
+  cancelAnimationFrame(galleryScroll.frame);
+  galleryScroll.frame = 0;
+  galleryScroll.direction = 0;
+  galleryScroll.positionY = null;
+  galleryScroll.lastAppliedY = null;
+  galleryScroll.lastTime = 0;
+  galleryScroll.loadingMore = false;
+}
+
+function applyGalleryScrollPosition(y) {
+  window.scrollTo({top: Math.max(0, y), left: window.scrollX, behavior: 'instant'});
+  if (state.layout === 'river') renderVisibleRiverRows();
+}
+
+function requestMoreGalleryRows(gallery) {
+  if (galleryScroll.loadingMore || state.nextOffset < 0) return;
+  galleryScroll.loadingMore = true;
+  void loadNextPage().finally(() => {
+    galleryScroll.loadingMore = false;
+    if (document.body.classList.contains('viewer-open') || $('#gallery') !== gallery) {
+      cancelGalleryScroll();
+    }
+  });
+}
+
+function stepGalleryScrollFrame(now) {
+  galleryScroll.frame = 0;
+  const gallery = $('#gallery');
+  if (!gallery || !galleryScroll.direction || document.body.classList.contains('viewer-open')) {
+    cancelGalleryScroll();
+    return;
+  }
+
+  const actualY = window.scrollY;
+  if (galleryScroll.lastAppliedY !== null && Math.abs(actualY - galleryScroll.lastAppliedY) > 6) {
+    // External scroll (e.g. scrollbar drag) took over.
+    cancelGalleryScroll();
+    return;
+  }
+
+  const dt = galleryScroll.lastTime ? Math.min(50, Math.max(1, now - galleryScroll.lastTime)) : 16;
+  galleryScroll.lastTime = now;
+  const direction = galleryScroll.direction;
+  const maxScrollY = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+  const currentY = Math.min(maxScrollY, Math.max(0, galleryScroll.positionY ?? actualY));
+  const nextY = Math.min(
+    maxScrollY,
+    Math.max(0, currentY + direction * (GALLERY_SCROLL_SPEED_PX_PER_SEC * dt / 1000))
+  );
+
+  if (direction > 0 && state.nextOffset >= 0 && nextY >= maxScrollY - window.innerHeight) {
+    requestMoreGalleryRows(gallery);
+  }
+
+  const beforeActualY = window.scrollY;
+  applyGalleryScrollPosition(nextY);
+  const afterActualY = window.scrollY;
+  const atTop = direction < 0 && nextY <= 0;
+  const atBottom = direction > 0 && nextY >= maxScrollY;
+  const clampedByBrowser = Math.abs(nextY - beforeActualY) > 2 && Math.abs(afterActualY - beforeActualY) < 0.01;
+
+  if (atTop || ((atBottom || clampedByBrowser) && state.nextOffset < 0)) {
+    cancelGalleryScroll();
+    return;
+  }
+
+  galleryScroll.positionY = clampedByBrowser ? afterActualY : nextY;
+  galleryScroll.lastAppliedY = afterActualY;
+  galleryScroll.frame = requestAnimationFrame(stepGalleryScrollFrame);
+}
+
+function startGalleryHold(delta) {
+  const direction = Number(delta) > 0 ? 1 : Number(delta) < 0 ? -1 : 0;
+  const gallery = $('#gallery');
+  if (!direction || !gallery || document.body.classList.contains('viewer-open')) return false;
+  if (!state.items.length) return false;
+
+  const maxScrollY = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+  if (direction < 0 && window.scrollY <= 0) return false;
+  if (direction > 0 && window.scrollY >= maxScrollY && state.nextOffset < 0) return false;
+
+  const sameDirection = galleryScroll.direction === direction && galleryScroll.frame;
+  galleryScroll.direction = direction;
+  if (!sameDirection) {
+    cancelAnimationFrame(galleryScroll.frame);
+    galleryScroll.frame = 0;
+    const now = performance.now();
+    galleryScroll.positionY = window.scrollY;
+    galleryScroll.lastAppliedY = window.scrollY;
+    galleryScroll.lastTime = now - 16;
+    stepGalleryScrollFrame(now);
+  }
+  return true;
+}
+
+function stopGalleryHold(delta = 0) {
+  const direction = Number(delta) > 0 ? 1 : Number(delta) < 0 ? -1 : 0;
+  if (direction && galleryScroll.direction && galleryScroll.direction !== direction) return;
+  cancelGalleryScroll();
+}
+
 window.addEventListener('scroll', scheduleRiverWindow, {passive: true});
+window.addEventListener('wheel', cancelGalleryScroll, {passive: true});
+window.addEventListener('touchstart', cancelGalleryScroll, {passive: true});
+window.addEventListener('pointerdown', cancelGalleryScroll, {passive: true});
 window.addEventListener('resize', () => {
+  cancelGalleryScroll();
   const gallery = $('#gallery');
   if (!gallery || state.layout !== 'river') return;
   if (Math.abs(gallery.clientWidth - state.galleryMeasuredWidth) > 0.5) scheduleRiverLayout();
